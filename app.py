@@ -51,7 +51,10 @@ workflow.add_edge("intake", "approved") # Simple linear flow for now
 workflow.add_edge("approved", END)
 
 # Compile the graph
-app_graph = workflow.compile()
+# This is the key change: we tell the graph to interrupt execution
+# *before* the "approved" node is run. This forces it to wait for
+# human input.
+app_graph = workflow.compile(interrupt_before=["approved"])
 
 # --- FastAPI Application ---
 app = FastAPI(
@@ -98,10 +101,16 @@ async def start_task(request: StartTaskRequest):
     )
     tasks[task_id] = initial_state
 
-    # Asynchronously run the graph
-    asyncio.create_task(app_graph.ainvoke(initial_state))
+    # Asynchronously run the graph until the first interruption
+    async def run_graph():
+        async for step in app_graph.astream(initial_state):
+            # The graph will now pause at the interrupt_before point
+            # and wait for the next ainvoke call.
+            # We don't need to do anything with the steps here for now.
+            pass
+    asyncio.create_task(run_graph())
 
-    return TaskStatus(**tasks[task_id])
+    return TaskStatus(**initial_state)
 
 @app.get("/get_pending_approval", response_model=Optional[TaskStatus])
 def get_pending_approval():
@@ -123,19 +132,20 @@ def respond_to_approval(request: RespondToApprovalRequest):
         raise HTTPException(status_code=404, detail="Task not found or not pending approval.")
 
     if request.approved:
-        # In a real graph, this would trigger the next step
-        # For now, we manually update the state
-        task['status'] = 'approved'
-        # Here you would continue the graph execution
         print(f"Task {request.task_id} approved by human.")
-        # For this simple version, we'll just move it to the final state
+        # This is where we resume the graph's execution.
+        # We pass `None` as the input to the next step.
         asyncio.create_task(app_graph.ainvoke(task))
     else:
         task['status'] = 'rejected'
+        tasks[request.task_id] = task # Update state for rejected tasks
         print(f"Task {request.task_id} rejected by human.")
+        # If rejected, we don't continue the graph.
+        return TaskStatus(**task)
 
-    tasks[request.task_id] = task
-    return TaskStatus(**task)
+    # For approved tasks, we need to wait a moment for the graph to finish
+    # and update the status to "completed".
+    return TaskStatus(**tasks[request.task_id])
 
 from fastapi.responses import FileResponse
 
