@@ -123,29 +123,26 @@ def get_pending_approval():
     return None
 
 @app.post("/respond_to_approval", response_model=TaskStatus)
-def respond_to_approval(request: RespondToApprovalRequest):
+async def respond_to_approval(request: RespondToApprovalRequest):
     """
     Allows the human to approve or reject a task.
     """
     task = tasks.get(request.task_id)
     if not task or task['status'] != 'pending_approval':
         raise HTTPException(status_code=404, detail="Task not found or not pending approval.")
-
+    
     if request.approved:
         print(f"Task {request.task_id} approved by human.")
         # This is where we resume the graph's execution.
-        # We pass `None` as the input to the next step.
-        asyncio.create_task(app_graph.ainvoke(task))
+        # We now `await` its completion to ensure the state is updated.
+        final_state = await app_graph.ainvoke(task)
+        return TaskStatus(**final_state)
     else:
         task['status'] = 'rejected'
         tasks[request.task_id] = task # Update state for rejected tasks
         print(f"Task {request.task_id} rejected by human.")
         # If rejected, we don't continue the graph.
         return TaskStatus(**task)
-
-    # For approved tasks, we need to wait a moment for the graph to finish
-    # and update the status to "completed".
-    return TaskStatus(**tasks[request.task_id])
 
 from fastapi.responses import FileResponse
 

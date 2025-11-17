@@ -115,6 +115,10 @@
         async function respondToApproval(approved) {
             if (!currentTaskId) return;
 
+            // --- FIX: Hide the approval section immediately ---
+            // This prevents the polling function from re-showing it during the request.
+            approvalSection.classList.add('hidden');
+
             try {
                 const response = await fetch(`${API_BASE_URL}/respond_to_approval`, {
                     method: 'POST',
@@ -126,7 +130,6 @@
 
                 const data = await response.json();
                 showMessage(`Task ${data.task_id} has been ${data.status}.`);
-                approvalSection.classList.add('hidden');
                 currentTaskId = null;
             } catch (error) {
                 showMessage(error.message, true);
