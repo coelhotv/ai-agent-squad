@@ -8,6 +8,7 @@ env/
 venv/
 *.egg-info/
 *.egg
+*.db
 
 # Docker
 .dockerignore
