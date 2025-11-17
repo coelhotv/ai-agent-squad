@@ -4,17 +4,22 @@ from fastapi import FastAPI, HTTPException, Depends
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from langgraph.graph import StateGraph, END
+from langgraph.graph import StateGraph, END 
 from typing import TypedDict, List, Optional
 import asyncio
 import logging
-from sqlalchemy import create_engine, Column, String, Text
+from sqlalchemy import create_engine, Column, String, Text, LargeBinary
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.ext.declarative import declarative_base
 
 # --- Logging Setup ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+# --- SQLAlchemy Logging ---
+# This will log all SQL statements issued by SQLAlchemy to the console.
+# Set to logging.DEBUG to see result rows as well.
+logging.getLogger('sqlalchemy.engine').setLevel(logging.INFO)
 
 # --- Database Setup (SQLite) ---
 DATABASE_URL = "sqlite:///./tasks.db"
@@ -29,6 +34,7 @@ class Task(Base):
     product_idea = Column(Text, nullable=False)
     status = Column(String, nullable=False)
     pending_approval_content = Column(Text, nullable=True)
+    checkpoint = Column(LargeBinary, nullable=True) # To store graph state
 
 # Create the database tables
 Base.metadata.create_all(bind=engine)
@@ -47,6 +53,7 @@ class AgentState(TypedDict):
     product_idea: str
     status: str
     pending_approval_content: Optional[str]
+    checkpoint: Optional[bytes] = None # Add checkpoint to state
 
 # --- Agent Node Functions (Placeholders) ---
 def intake_node(state: AgentState):
@@ -109,6 +116,10 @@ class TaskStatus(BaseModel):
     product_idea: str
     pending_approval_content: Optional[str] = None
 
+    # Pydantic V2 config to allow creating model from ORM objects
+    class Config:
+        from_attributes = True
+
 class RespondToApprovalRequest(BaseModel):
     task_id: str
     approved: bool # Human's decision
@@ -138,15 +149,25 @@ async def start_task(request: StartTaskRequest, db: Session = Depends(get_db)):
     # Asynchronously run the graph until the first interruption
     async def run_graph():
         logger.info(f"Graph for task {task_id} starting execution.")
-        async for step in app_graph.astream(initial_state):
-            # The last step before interruption contains the updated state
-            final_step_state = step.get(list(step.keys())[-1])
-
-        # Update the database with the state from the graph right before it paused
-        db_task.status = final_step_state['status']
-        db_task.pending_approval_content = final_step_state['pending_approval_content']
-        db.commit()
-        logger.info(f"Graph for task {task_id} paused. DB updated with status '{db_task.status}'.")
+        # This background task needs its own database session
+        with SessionLocal() as db_session:
+            # Use astream_events to get the checkpoint when the graph is interrupted
+            last_state = None
+            async for event in app_graph.astream_events(initial_state, version="v1"):
+                kind = event["event"]
+                if kind == "on_chain_stream":
+                    # Capture the output of the last node that ran before interruption
+                    if event["name"] == "intake":
+                        last_state = event["data"]["chunk"]
+                elif kind == "on_chain_end" and event["metadata"].get("interrupted"):
+                    # Graph was interrupted, now we can save the state and checkpoint
+                    task_to_update = db_session.query(Task).filter(Task.task_id == task_id).first()
+                    if task_to_update and last_state:
+                        task_to_update.status = last_state['status']
+                        task_to_update.pending_approval_content = last_state['pending_approval_content']
+                        task_to_update.checkpoint = event["metadata"]["checkpoint"]
+                        db_session.commit()
+                        logger.info(f"Graph for task {task_id} paused. DB updated with status '{task_to_update.status}' and checkpoint.")
 
     asyncio.create_task(run_graph())
 
@@ -176,25 +197,24 @@ async def respond_to_approval(request: RespondToApprovalRequest, db: Session = D
     
     if request.approved:
         logger.info(f"Task {request.task_id} approved by human. Resuming graph.")
-        # Convert DB model back to AgentState dictionary to resume graph
-        current_state = AgentState(
-            task_id=db_task.task_id,
-            product_idea=db_task.product_idea,
-            status=db_task.status,
-            pending_approval_content=db_task.pending_approval_content
-        )
-        # This is where we resume the graph's execution.
-        # We now `await` its completion to ensure the state is updated.
-        final_state = await app_graph.ainvoke(current_state)
+        # Load the checkpoint from the database to resume the graph
+        checkpoint = db_task.checkpoint
+        
+        # Resume the graph from the checkpoint
+        final_state = await app_graph.ainvoke(None, {"checkpoint": checkpoint})
 
         # Update the DB with the final state from the graph
-        db_task.status = final_state['status']
+        db_task.status = final_state.get('status', 'completed') # Use .get for safety
+        db_task.pending_approval_content = None # Clear the approval content
+        db_task.checkpoint = None # Clear the used checkpoint
         db.commit()
         logger.info(f"Graph for task {request.task_id} finished. Final status: '{db_task.status}'.")
         return TaskStatus.from_orm(db_task)
     else:
         logger.info(f"Task {request.task_id} rejected by human.")
         db_task.status = 'rejected'
+        db_task.pending_approval_content = None # Clear the approval content
+        db_task.checkpoint = None # Clear the unused checkpoint
         db.commit()
         # If rejected, we don't continue the graph.
         return TaskStatus.from_orm(db_task)

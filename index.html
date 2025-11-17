@@ -48,6 +48,7 @@
     <script>
         const API_BASE_URL = 'http://localhost:8000';
         let currentTaskId = null;
+        let pollingIntervalId = null; // To hold the ID of our polling interval
 
         const ideaForm = document.getElementById('idea-form');
         const productIdeaTextarea = document.getElementById('product-idea');
@@ -85,6 +86,7 @@
                 currentTaskId = data.task_id;
                 showMessage(`Task ${data.task_id} started with status: ${data.status}`);
                 productIdeaTextarea.value = ''; // Clear textarea
+                startPolling(); // Start polling only after a task is submitted
             } catch (error) {
                 showMessage(error.message, true);
             }
@@ -102,12 +104,27 @@
                     currentTaskId = data.task_id;
                     approvalContent.textContent = data.pending_approval_content;
                     approvalSection.classList.remove('hidden');
+                    stopPolling(); // Stop polling once we have a task to approve
                 } else {
                     approvalSection.classList.add('hidden');
                 }
             } catch (error) {
                 // Don't show polling errors to avoid spamming the user
                 console.error('Polling error:', error);
+            }
+        }
+
+        // --- Polling Control Functions ---
+        function startPolling() {
+            if (pollingIntervalId) return; // Don't start if already polling
+            showMessage("Waiting for task to be ready for approval...");
+            pollingIntervalId = setInterval(pollForApprovals, 3000);
+        }
+
+        function stopPolling() {
+            if (pollingIntervalId) {
+                clearInterval(pollingIntervalId);
+                pollingIntervalId = null;
             }
         }
 
@@ -139,8 +156,6 @@
         approveBtn.addEventListener('click', () => respondToApproval(true));
         rejectBtn.addEventListener('click', () => respondToApproval(false));
 
-        // --- Start Polling ---
-        setInterval(pollForApprovals, 3000); // Poll every 3 seconds
         showMessage("System ready. Submit a product idea to begin.");
     </script>
 
