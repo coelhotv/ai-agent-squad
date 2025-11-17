@@ -32,7 +32,7 @@ logging.getLogger('sqlalchemy.engine').setLevel(logging.INFO)
 
 # --- Application Database (SQLite) ---
 # This DB stores the high-level status of tasks for the UI
-DATABASE_URL = "sqlite:///./tasks.db"
+DATABASE_URL = "sqlite:////data/tasks.db"
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
@@ -62,7 +62,7 @@ class AgentState(TypedDict):
 
 # The checkpointer is responsible for saving and loading the state of the graph
 # It uses a separate SQLite database to store the checkpoints
-memory_saver = SqliteSaver.from_conn_string("sqlite:///./checkpoints.sqlite")
+memory_saver = SqliteSaver.from_conn_string("sqlite:////data/checkpoints.sqlite")
 
 # --- Agent Node Functions ---
 # These nodes now only focus on modifying the state dictionary.
