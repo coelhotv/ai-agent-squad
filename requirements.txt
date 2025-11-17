@@ -7,3 +7,6 @@ fastapi
 uvicorn
 langgraph
 sqlalchemy
+
+# For SQLite support in LangGraph
+langgraph[sqlite]
