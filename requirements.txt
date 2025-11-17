@@ -6,3 +6,4 @@ langchain-ollama
 fastapi
 uvicorn
 langgraph
+sqlalchemy

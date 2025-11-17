@@ -41,6 +41,11 @@ This is the most critical part of our setup. We are balancing performance with i
 
 - **The "Bridge":** The `app` container communicates with the native Ollama app via the special Docker DNS name: `http://host.docker.internal:11434`.
 
+- **Persistence:** A **SQLite database** (`tasks.db`) runs inside the container and is mapped to the host. It stores all task states, ensuring that no work is lost if the application crashes or restarts.
+
+- **Logging:** The application uses Python's standard `logging` module to provide structured, timestamped output. This is crucial for debugging the asynchronous and multi-step workflows.
+
+
 
 ## **3. The "Product Squad" (Agent Roles)**
 
@@ -91,11 +96,12 @@ This is the most critical part of our setup. We are balancing performance with i
 
 - **Actions:**
 
-1. Build the simplest LangGraph app (`app.py`).
-
-2. Create the FastAPI backend with `/start_task` and `/get_pending_approval`.
-
-3. Create a basic `index.html` UI for task intake and approval.
+1.  Built the simplest LangGraph app (`app.py`) with an `intake` and `approved` node.
+2.  Created the FastAPI backend with `/start_task`, `/get_pending_approval`, and `/respond_to_approval` endpoints.
+3.  Created a basic `index.html` UI for task intake and HITL approval.
+4.  **Decision:** Implemented a robust HITL pause using LangGraph's `interrupt_before` feature.
+5.  **Decision:** Added a **SQLite database** using `SQLAlchemy` to replace the fragile in-memory task dictionary, ensuring persistence.
+6.  **Decision:** Integrated Python's `logging` module to replace `print()` statements for better observability.
 
 **Phase 3: The First Specialist - "Research" Agent**
 
