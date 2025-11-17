@@ -9,4 +9,4 @@ langgraph
 sqlalchemy
 
 # For SQLite support in LangGraph
-langgraph[sqlite]
+langgraph-checkpoint-sqlite

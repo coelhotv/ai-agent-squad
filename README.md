@@ -62,13 +62,37 @@ ollama pull deepseek-r1:8b-llama-distill-q4_K_M
 
 ### Step 2: Update Dependencies
 
-Add the following line to your `requirements.txt` file. This is required for LangGraph's SQLite checkpointer.
+
+
+
+
+
+
+Ensure the `requirements.txt` file includes the package for SQLite support. This is required for LangGraph's checkpointer.
+
+
+
+
+
+
 
 ```
 
-langgraph[sqlite]
+
+
+langgraph-checkpoint-sqlite
+
+
 
 ```
+
+
+
+
+
+
+
+**Note:** We initially used `langgraph[sqlite]`, but this was found to cause dependency resolution issues. The correct and stable package is `langgraph-checkpoint-sqlite`.
 
 
 
