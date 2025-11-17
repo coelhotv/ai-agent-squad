@@ -1,5 +1,6 @@
 # This is for LangChain and its ability to talk to Ollama
 langchain
+langchain-core>=0.1.48
 langchain-ollama
 
 # For the web server and API

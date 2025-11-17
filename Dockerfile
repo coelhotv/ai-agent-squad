@@ -8,5 +8,5 @@ WORKDIR /code
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# The container will be started by docker-compose
-# The 'command: tail -f /dev/null' will keep it running
+# Copy the rest of the application code
+COPY . .

@@ -12,10 +12,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 # --- LangGraph Imports ---
-# Note: You will need to add 'langgraph[sqlite]' to your requirements.txt
-# pip install "langgraph[sqlite]"
 from langgraph.graph import StateGraph, END
-from langgraph.checkpoint.sqlite import SqliteSaver
+from langgraph_checkpoint_sqlite import SqliteSaver # Corrected import
 
 # --- Typing Imports ---
 from typing import TypedDict, Optional
