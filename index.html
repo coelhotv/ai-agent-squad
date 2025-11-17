@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Product Squad</title>
+    <style>
+        body { font-family: sans-serif; margin: 2em; background-color: #f4f4f9; color: #333; }
+        .container { max-width: 800px; margin: auto; background: white; padding: 2em; border-radius: 8px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
+        h1, h2 { color: #444; }
+        textarea { width: 100%; padding: 0.5em; border-radius: 4px; border: 1px solid #ccc; }
+        button { padding: 0.7em 1.2em; border: none; border-radius: 4px; background-color: #007bff; color: white; cursor: pointer; margin-right: 0.5em; }
+        button:hover { background-color: #0056b3; }
+        #approval-section { margin-top: 2em; padding: 1em; background-color: #fffbe6; border: 1px solid #ffe58f; border-radius: 4px; }
+        #approval-section.hidden { display: none; }
+        #response-message { margin-top: 1em; padding: 1em; border-radius: 4px; }
+        #response-message.success { background-color: #e6ffed; border: 1px solid #b7ebc9; }
+        #response-message.error { background-color: #ffebe6; border: 1px solid #ffc9c9; }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1>AI Product Squad Task Manager</h1>
+
+        <!-- Intake Form -->
+        <div id="intake-form">
+            <h2>1. Submit a New Product Idea</h2>
+            <form id="idea-form">
+                <textarea id="product-idea" name="product-idea" rows="4" placeholder="e.g., A mobile app that uses AI to identify plants from photos."></textarea>
+                <br><br>
+                <button type="submit">Start Task</button>
+            </form>
+        </div>
+
+        <!-- Approval Section -->
+        <div id="approval-section" class="hidden">
+            <h2>2. Pending Approval</h2>
+            <p id="approval-content"></p>
+            <button id="approve-btn">Approve</button>
+            <button id="reject-btn" style="background-color: #dc3545;">Reject</button>
+        </div>
+
+        <!-- Response Message -->
+        <div id="response-message"></div>
+    </div>
+
+    <script>
+        const API_BASE_URL = 'http://localhost:8000';
+        let currentTaskId = null;
+
+        const ideaForm = document.getElementById('idea-form');
+        const productIdeaTextarea = document.getElementById('product-idea');
+        const approvalSection = document.getElementById('approval-section');
+        const approvalContent = document.getElementById('approval-content');
+        const approveBtn = document.getElementById('approve-btn');
+        const rejectBtn = document.getElementById('reject-btn');
+        const responseMessage = document.getElementById('response-message');
+
+        // --- Function to show messages ---
+        function showMessage(message, isError = false) {
+            responseMessage.textContent = message;
+            responseMessage.className = isError ? 'error' : 'success';
+        }
+
+        // --- 1. Start a new task ---
+        ideaForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const idea = productIdeaTextarea.value;
+            if (!idea) {
+                showMessage('Please enter a product idea.', true);
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/start_task`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ product_idea: idea }),
+                });
+
+                if (!response.ok) throw new Error('Failed to start task.');
+
+                const data = await response.json();
+                currentTaskId = data.task_id;
+                showMessage(`Task ${data.task_id} started with status: ${data.status}`);
+                productIdeaTextarea.value = ''; // Clear textarea
+            } catch (error) {
+                showMessage(error.message, true);
+            }
+        });
+
+        // --- 2. Poll for pending approvals ---
+        async function pollForApprovals() {
+            try {
+                const response = await fetch(`${API_BASE_URL}/get_pending_approval`);
+                if (!response.ok) return; // Don't show error on regular polling
+
+                const data = await response.json();
+
+                if (data && data.task_id) {
+                    currentTaskId = data.task_id;
+                    approvalContent.textContent = data.pending_approval_content;
+                    approvalSection.classList.remove('hidden');
+                } else {
+                    approvalSection.classList.add('hidden');
+                }
+            } catch (error) {
+                // Don't show polling errors to avoid spamming the user
+                console.error('Polling error:', error);
+            }
+        }
+
+        // --- 3. Respond to an approval request ---
+        async function respondToApproval(approved) {
+            if (!currentTaskId) return;
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/respond_to_approval`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ task_id: currentTaskId, approved: approved }),
+                });
+
+                if (!response.ok) throw new Error('Failed to respond to approval.');
+
+                const data = await response.json();
+                showMessage(`Task ${data.task_id} has been ${data.status}.`);
+                approvalSection.classList.add('hidden');
+                currentTaskId = null;
+            } catch (error) {
+                showMessage(error.message, true);
+            }
+        }
+
+        approveBtn.addEventListener('click', () => respondToApproval(true));
+        rejectBtn.addEventListener('click', () => respondToApproval(false));
+
+        // --- Start Polling ---
+        setInterval(pollForApprovals, 3000); // Poll every 3 seconds
+        showMessage("System ready. Submit a product idea to begin.");
+    </script>
+
+</body>
+</html>

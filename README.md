@@ -1,103 +1,96 @@
-# Multi-Agent Product Squad
+# Project: Multi-Agent Product Squad
 
 This project is a hands-on experiment to build a coordinated, multi-agent "product squad" capable of validating and prototyping early-stage product ideas. The entire system runs on a local Mac, utilizing a hybrid architecture to balance performance and environment isolation.
 
-This project is being built with the support of Gemini.
+The squad is managed by a **LangGraph**-based "Coordinator" and includes a **FastAPI** backend to serve a simple web UI for Human-in-the-Loop (HITL) approvals.
 
 ## 1. Core Vision
 
 The goal is to create a "Coordinator" agent that manages a team of specialist agents (Research, Product, UX, Engineering, QA, GTM). The system is built with a human-in-the-loop (HITL) for all key decisions, managed via a simple web UI.
 
-* **Coordinator:** The "brain" that routes tasks.
-* **Specialists:** Agents with specific skills and tools.
-* **Human:** The "approver" who validates and guides the process.
+*   **Coordinator:** The "brain" that routes tasks.
+*   **Specialists:** Agents with specific skills and tools.
+*   **Human:** The "approver" who validates and guides the process.
 
 ## 2. Architecture: The Hybrid Model
 
 This project uses a hybrid architecture to get the best of both worlds:
 
-* **🤖 LLM Engine (Host):** **Ollama** runs as a **native macOS app**. This provides full access to the M2's Metal GPU for high-performance inference.
-* **🐍 Agent Application (Docker):** The core Python application (using **LangGraph** and **FastAPI**) runs in an **isolated Docker container**.
-* **🌉 The Bridge:** The `app` container communicates with the native Ollama app via the DNS name `http://host.docker.internal:11434`.
+*   **🤖 LLM Engine (Host):** **Ollama** runs as a **native macOS app**. This provides full access to the M2's Metal GPU for high-performance inference.
+*   **🐍 Agent Application (Docker):** The core Python application (using **LangGraph** and **FastAPI**) runs in an **isolated Docker container**.
+*   **🌉 The Bridge:** The `app` container communicates with the native Ollama app via the DNS name `http://host.docker.internal:11434`.
 
-[Image of a diagram showing a Docker container pointing to a host macOS icon]
-
-## 3. Local Development Setup
-
-This project is designed to run on macOS with Docker Desktop and a native Ollama installation.
+## 3. How to Run the Application
 
 ### Prerequisites
-* [Ollama macOS App](https://ollama.com/)
-* [Docker Desktop](https://www.docker.com/products/docker-desktop/)
-* [Python 3.11+](https://www.python.org/)
-* [FastAPI](https://fastapi.tiangolo.com/)
+*   [Ollama macOS App](https://ollama.com/) (and ensure it's running)
+*   [Docker Desktop](https://www.docker.com/products/docker-desktop/) (and ensure it's running)
+*   Python 3.11+
 
-### Step 1: Clone & Set Up the Repo
+### Step 1: Prepare the Model
+Make sure the Ollama macOS app is running and you have pulled the model we're using.
 ```bash
-# Clone your repository (if it's on GitHub)
-# git clone ...
-cd ai-agent-squad
-```
-
-### Step 2: Set Up the Host Environment
-We use a local Python virtual environment to make VS Code's Pylance happy.
-```bash
-# Create the virtual environment
-python3 -m venv .venv
-
-# Activate it
-source .venv/bin/activate
-
-# Install libraries for IDE support
-pip3 install -r requirements.txt
-
-# Tell VS Code to use this venv
-# (Cmd+Shift+P) > "Python: Select Interpreter" > ./.venv/bin/python
-```
-
-### Step 3: Prepare Ollama (Native)
-Make sure the Ollama macOS app is running.
-```bash
-# Pull the model for the native app
 ollama pull deepseek-r1:8b-llama-distill-q4_K_M
 ```
 
-### Step 4: Launch the Application (Docker)
-This command builds and starts the `app_service` Docker container.
+### Step 2: Launch the Application
+This single command builds the Docker image, installs the Python dependencies, and starts the FastAPI server.
 ```bash
-# Build and run the docker container in detached mode
 docker-compose up -d --build
 ```
+The server will be running and accessible at `http://localhost:8000`.
 
-### Step 5: Test the Connection
-You can test that the container can talk to the host's Ollama.
+### Step 3: (Optional) Set Up IDE Support
+For better IDE support (e.g., in VS Code), you can create a local virtual environment and install the dependencies there. This allows Pylance to find the libraries.
 ```bash
-# Run the 'app.py' script inside the container
-docker exec -it app_service python3 app.py
+# Create and activate the virtual environment
+python3 -m venv .venv
+source .venv/bin/activate
+
+# Install libraries
+pip3 install -r requirements.txt
+
+# In VS Code, use Cmd+Shift+P -> "Python: Select Interpreter"
+# and choose the one in the ./.venv/bin directory.
 ```
 
-This should return a 3-step plan from the DeepSeek model, very quickly.
+## 4. How It Works: The Core Loop
 
+The application is now running the essential `Intake -> Approve -> End` loop. Here’s a walkthrough:
 
-## 4. Project Plan (Phased)
+1.  **Submit an Idea:** You navigate to `http://localhost:8000`, enter a product idea into the text box, and click **"Start Task"**.
 
-### Phase 1: The "Stack" (Completed)
-- Set up hybrid Docker/Ollama architecture.
-- Established GPU-accelerated LLM connection.
-- Solved local IDE environment.
+2.  **Kick-off the Process:** The browser sends the idea to the backend, which creates a unique Task ID and triggers the LangGraph workflow, starting at the `"intake"` node.
 
-### Phase 2: The Core Loop (_NEXT_)
-- Building the LangGraph coordinator and FastAPI server.
-- Creating the basic index.html UI for intake and approval.
+3.  **Intake Node:** This first agent node prepares the task for human review. It sets the task's status to `pending_approval` and generates the message for the user. The workflow then **pauses** to wait for a human decision.
 
-### Phase 3: The First Specialist
-- Adding the "Research" agent with a web search tool.
+4.  **UI Asks for Approval:** The web UI, which has been checking with the backend, finds the pending task. It displays the approval message and shows the **"Approve"** and **"Reject"** buttons.
 
-### Phase 4: The Design Sprint
-- Adding "Product" (specs) and "UX/Designer" (Mermaid, HTML) agents.
+5.  **Human Decision:** You click **"Approve"**. Your decision is sent back to the backend.
 
-### Phase 5: The Build Sprint
-- Adding "Engineering" (code) and "QA" (review) agents.
+6.  **Workflow Completes:** The backend receives your approval and tells the LangGraph workflow to continue. It moves to the `"approved"` node, which marks the task as `completed`, and the workflow ends.
 
-### Phase 6: The "Ship"
-- Adding the "GTM" (README) agent and packaging the final output.
+## 5. Project Plan (Phased)
+
+*   **Phase 1: The "Stack" - (COMPLETED)**
+    *   Set up hybrid Docker/Ollama architecture.
+    *   Established GPU-accelerated LLM connection.
+    *   Solved local IDE environment.
+
+*   **Phase 2: The Core Loop - (COMPLETED)**
+    *   Built the essential `Intake -> Approve -> End` loop.
+    *   Built the simplest LangGraph app (`app.py`).
+    *   Created the FastAPI backend with `/start_task` and `/get_pending_approval`.
+    *   Created a basic `index.html` UI for task intake and approval.
+
+*   **Phase 3: The First Specialist - (NEXT)**
+    *   Adding the "Research" agent with a web search tool.
+
+*   **Phase 4: The Design Sprint**
+    *   Adding "Product" (specs) and "UX/Designer" (Mermaid, HTML) agents.
+
+*   **Phase 5: The Build Sprint**
+    *   Adding "Engineering" (code) and "QA" (review) agents.
+
+*   **Phase 6: The "Ship"**
+    *   Adding the "GTM" (README) agent and packaging the final output.
