@@ -1,0 +1,18 @@
+# version: '3.9'
+
+services:
+  # We have removed the 'ollama' service entirely.
+  # We only have our Python application service now.
+  app:
+    build: .
+    container_name: app_service
+    # This command just keeps the container alive
+    command: tail -f /dev/null
+    volumes:
+      # Mounts our current project folder into the container
+      - .:/code
+    working_dir: /code
+    restart: unless-stopped
+    # We have removed 'depends_on: - ollama'
+
+# We have also removed the top-level 'volumes: ollama_data'
