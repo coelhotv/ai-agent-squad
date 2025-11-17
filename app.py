@@ -146,12 +146,16 @@ async def start_task(request: StartTaskRequest, db: Session = Depends(get_db)):
 
     # 3. Asynchronously invoke the graph. It will run until it hits the interruption.
     # The checkpointer automatically saves its state.
-    interrupted_state = await app_graph.ainvoke(initial_state, config)
+    await app_graph.ainvoke(initial_state, config)
     logger.info(f"Graph for task {task_id} executed until interruption.")
 
-    # 4. Update our application DB with the new status from the graph
-    db_task.status = interrupted_state['status']
-    db_task.pending_approval_content = interrupted_state['pending_approval_content']
+    # 4. Get the state of the graph at the interruption point
+    interrupted_state = app_graph.get_state(config)
+    logger.info(f"Current graph state for task {task_id}: {interrupted_state.values}")
+
+    # 5. Update our application DB with the new status from the graph
+    db_task.status = interrupted_state.values['status']
+    db_task.pending_approval_content = interrupted_state.values['pending_approval_content']
     db.commit()
     db.refresh(db_task)
     logger.info(f"Task {task_id} updated in DB to status '{db_task.status}'.")
