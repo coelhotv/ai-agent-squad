@@ -14,7 +14,7 @@ To build a coordinated, multi-agent "product squad" that can validate and ship e
 
 - **Interface:** A **FastAPI** backend serving a **simple web UI** (HTML/JS/CSS) for project intake and Human-in-the-Loop (HITL) approvals.
 
-- **IDE:** **VS Code** (with the **Google Gemini** extension for support).
+- **IDE:** **VS Code** (with some **AI** extension for support).
 
 - **Repository:** A **GitHub** repository for version control.
 
@@ -107,7 +107,7 @@ This is the most critical part of our setup. We are balancing performance with i
     *   `checkpoints.sqlite`: For the LangGraph agent's detailed execution state.
 6.  This new architecture dramatically simplifies the code and makes the pause/resume cycle much more reliable.
 
-**Phase 3: The First Specialist - "Research" Agent**
+**Phase 3: The First Specialist - "Research" Agent - (NEXT)**
 
 - **Goal:** Add the "Research" agent and give it a tool.
 

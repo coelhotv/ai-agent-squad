@@ -2,6 +2,8 @@
 import uuid
 import asyncio
 import logging
+import atexit
+from contextlib import ExitStack
 
 # --- FastAPI Imports ---
 from fastapi import FastAPI, HTTPException, Depends
@@ -13,7 +15,7 @@ from pydantic import BaseModel
 
 # --- LangGraph Imports ---
 from langgraph.graph import StateGraph, END
-from langgraph_checkpoint_sqlite import SqliteSaver # Corrected import
+from langgraph.checkpoint.sqlite import SqliteSaver
 
 # --- Typing Imports ---
 from typing import TypedDict, Optional
@@ -58,9 +60,14 @@ class AgentState(TypedDict):
     status: str
     pending_approval_content: Optional[str]
 
-# The checkpointer is responsible for saving and loading the state of the graph
-# It uses a separate SQLite database to store the checkpoints
-memory_saver = SqliteSaver.from_conn_string("sqlite:////data/checkpoints.sqlite")
+# The checkpointer is responsible for saving and loading the state of the graph.
+# `SqliteSaver.from_conn_string` returns a context manager, so keep it open
+# for the lifetime of the app and cleanly close on shutdown.
+_checkpointer_stack = ExitStack()
+memory_saver = _checkpointer_stack.enter_context(
+    SqliteSaver.from_conn_string("sqlite:////data/checkpoints.sqlite")
+)
+atexit.register(_checkpointer_stack.close)
 
 # --- Agent Node Functions ---
 # These nodes now only focus on modifying the state dictionary.
