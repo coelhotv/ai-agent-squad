@@ -1,3 +1,8 @@
 # This is for LangChain and its ability to talk to Ollama
 langchain
 langchain-ollama
+
+# For the web server and API
+fastapi
+uvicorn
+langgraph

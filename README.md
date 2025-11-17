@@ -86,7 +86,7 @@ This should return a 3-step plan from the DeepSeek model, very quickly.
 - Established GPU-accelerated LLM connection.
 - Solved local IDE environment.
 
-### Phase 2: The Core Loop
+### Phase 2: The Core Loop (_NEXT_)
 - Building the LangGraph coordinator and FastAPI server.
 - Creating the basic index.html UI for intake and approval.
 
