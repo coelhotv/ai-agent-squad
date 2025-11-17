@@ -41,7 +41,9 @@ This is the most critical part of our setup. We are balancing performance with i
 
 - **The "Bridge":** The `app` container communicates with the native Ollama app via the special Docker DNS name: `http://host.docker.internal:11434`.
 
-- **Persistence:** A **SQLite database** (`tasks.db`) runs inside the container and is mapped to the host. It stores all task states, ensuring that no work is lost if the application crashes or restarts.
+- **Persistence (`tasks.db`):** A **SQLite database** (`tasks.db`) stores the high-level status of each task (e.g., `starting`, `pending_approval`, `completed`). This is used by the web UI to track overall progress.
+
+- **Graph Persistence (`checkpoints.sqlite`):** LangGraph's built-in **`SqliteSaver`** is used as a **checkpointer**. It automatically saves the detailed, internal state of the running agent graph into a separate `checkpoints.sqlite` file. This allows the graph to be reliably paused and resumed without losing its context.
 
 - **Logging:** The application uses Python's standard `logging` module to provide structured, timestamped output. This is crucial for debugging the asynchronous and multi-step workflows.
 
@@ -90,18 +92,20 @@ This is the most critical part of our setup. We are balancing performance with i
 
 8. Confirmed a fast, successful "Hello, World!" test.
 
-**Phase 2: The Core Loop - "Coordinator" & HITL UI - (COMPLETED)**
+**Phase 2: The Core Loop - "Coordinator" & HITL UI - (COMPLETED & REFINED)**
 
-- **Goal:** Build the essential `Intake -> Approve -> End` loop.
+- **Goal:** Build a robust, persistent `Intake -> Approve -> End` loop.
 
 - **Actions:**
 
 1.  Built the simplest LangGraph app (`app.py`) with an `intake` and `approved` node.
 2.  Created the FastAPI backend with `/start_task`, `/get_pending_approval`, and `/respond_to_approval` endpoints.
 3.  Created a basic `index.html` UI for task intake and HITL approval.
-4.  **Decision:** Implemented a robust HITL pause using LangGraph's `interrupt_before` feature.
-5.  **Decision:** Added a **SQLite database** using `SQLAlchemy` to replace the fragile in-memory task dictionary, ensuring persistence.
-6.  **Decision:** Integrated Python's `logging` module to replace `print()` statements for better observability.
+4.  **Architectural Refactor:** Replaced the fragile, manual state management with LangGraph's built-in **`SqliteSaver` checkpointer**.
+5.  **Separation of Concerns:** The system now uses two databases:
+    *   `tasks.db`: For the web application's high-level task status.
+    *   `checkpoints.sqlite`: For the LangGraph agent's detailed execution state.
+6.  This new architecture dramatically simplifies the code and makes the pause/resume cycle much more reliable.
 
 **Phase 3: The First Specialist - "Research" Agent**
 
