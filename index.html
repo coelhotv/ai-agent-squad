@@ -22,7 +22,7 @@
             padding: 2rem;
         }
         .hero-screen {
-            width: min(1200px, 100%);
+            width: min(1600px, 100%);
             background: #ffffffcc;
             backdrop-filter: blur(12px);
             border-radius: 32px;
@@ -389,14 +389,14 @@
             </div>
         </section>
 
-        <div id="artifact-modal" class="modal-overlay hidden">
-            <div class="modal-content">
-                <button id="close-modal" class="modal-close" aria-label="Close">&times;</button>
-                <h3 id="modal-title" class="modal-heading"></h3>
-                <div id="modal-body" class="modal-body">No content yet.</div>
-            </div>
-        </div>
+    </div>
 
+    <div id="artifact-modal" class="modal-overlay hidden">
+        <div class="modal-content">
+            <button id="close-modal" class="modal-close" aria-label="Close">&times;</button>
+            <h3 id="modal-title" class="modal-heading"></h3>
+            <div id="modal-body" class="modal-body">No content yet.</div>
+        </div>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
@@ -499,6 +499,14 @@
             renderWireframe(null);
         }
 
+        function updateArtifactsFromTask(task) {
+            renderArtifact(researchContent, task?.research_summary);
+            renderArtifact(prdContent, task?.prd_summary);
+            renderArtifact(storiesContent, task?.user_stories);
+            renderFlowDiagram(task?.user_flow_diagram);
+            renderWireframe(task?.wireframe_html);
+        }
+
         ideaForm.addEventListener('submit', async (e) => {
             e.preventDefault();
             const idea = productIdeaTextarea.value.trim();
@@ -549,11 +557,7 @@
                     currentTaskId = data.task_id;
                     approvalContent.textContent = data.pending_approval_content || 'Pending your review.';
                     approvalSection.classList.remove('hidden');
-                    renderArtifact(researchContent, data.research_summary);
-                    renderArtifact(prdContent, data.prd_summary);
-                    renderArtifact(storiesContent, data.user_stories);
-                    renderFlowDiagram(data.user_flow_diagram);
-                    renderWireframe(data.wireframe_html);
+                    updateArtifactsFromTask(data);
                     updateCurrentStage(data.status);
                     stopPolling();
                 } else {
@@ -583,6 +587,7 @@
             if (type === 'flow') {
                 modalTitle.textContent = 'User Flow Diagram';
                 if (storedFlowDiagram && window.mermaid) {
+                    modalBody.textContent = 'Rendering diagram...';
                     const renderId = `mermaid-${Date.now()}`;
                     try {
                         window.mermaid.render(renderId, storedFlowDiagram, (svgCode) => {
@@ -590,16 +595,39 @@
                         });
                     } catch (error) {
                         console.error('Mermaid render error:', error);
-                        modalBody.innerHTML = `<p>Unable to render diagram.</p><pre>${storedFlowDiagram}</pre>`;
+                        modalBody.innerHTML = `<p>Unable to render diagram.</p><pre>${storedFlowDiagram.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</pre>`;
                     }
+                } else if (storedFlowDiagram) {
+                    modalBody.innerHTML = `<pre>${storedFlowDiagram.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</pre>`;
                 } else {
                     modalBody.textContent = 'No diagram available yet.';
                 }
             } else if (type === 'wireframe') {
                 modalTitle.textContent = 'Wireframe (Tailwind HTML)';
-                modalBody.innerHTML = storedWireframeHtml
-                    ? `<pre>${storedWireframeHtml.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</pre>`
-                    : 'No wireframe available yet.';
+                if (storedWireframeHtml) {
+                    const iframe = document.createElement('iframe');
+                    iframe.style.width = '100%';
+                    iframe.style.height = '70vh';
+                    iframe.style.border = 'none';
+                    iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin');
+                    const template = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <scr` + `ipt src="https://cdn.tailwindcss.com"></scr` + `ipt>
+  <style>body{margin:0;background:#0f172a;font-family:Inter,system-ui,sans-serif;}</style>
+</head>
+<body>
+${storedWireframeHtml}
+</body>
+</html>`;
+                    iframe.srcdoc = template;
+                    modalBody.innerHTML = '';
+                    modalBody.appendChild(iframe);
+                } else {
+                    modalBody.textContent = 'No wireframe available yet.';
+                }
             }
         }
 
@@ -634,6 +662,7 @@
                 if (!response.ok) throw new Error('Unable to respond to approval.');
                 const data = await response.json();
                 updateCurrentStage(data.status);
+                updateArtifactsFromTask(data);
                 if (["pending_research_approval", "pending_prd_approval", "pending_story_approval", "pending_ux_approval", "pending_approval"].includes(data.status)) {
                     showMessage(`Task ${data.task_id} advanced to ${data.status}. Waiting for the next approval.`);
                     currentTaskId = data.task_id;

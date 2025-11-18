@@ -130,9 +130,9 @@ def log_environment_status():
 
     try:
         with httpx.Client(timeout=2) as client:
-            response = client.get(f"{OLLAMA_BASE_URL}/api/tags")
+            response = client.get(f"{OLLAMA_BASE_URL}api/ps")
             response.raise_for_status()
-            logger.info("Successfully reached Ollama endpoint (%s).", f"{OLLAMA_BASE_URL}/api/tags")
+            logger.info("Successfully reached Ollama endpoint (%s).", f"{OLLAMA_BASE_URL}api/ps")
     except Exception as exc:
         logger.warning("Unable to reach Ollama at %s: %s", OLLAMA_BASE_URL, exc)
 
@@ -195,11 +195,13 @@ def query_perplexity(product_idea: str) -> Optional[str]:
         },
     }
     system_prompt = (
-        "You are a market research analyst. Analyze the idea, compare competitors,"
+        "You are a senior market research analyst. Analyze the idea, compare competitors,"
         " and highlight opportunities, risks, and references."
     )
     user_prompt = (
         f"Idea: {product_idea}. Provide insights for PM/UX planning."
+        " Keep it concise and structured. Max 2-3 paragraphs for summary,"
+        " 2-3 bullets each for opportunities and risks."
         " Use credible sources and cite URLs in references."
     )
 
@@ -231,7 +233,7 @@ def call_perplexity_json(
         "Accept": "application/json",
     }
 
-    with httpx.Client(timeout=30) as client:
+    with httpx.Client(timeout=120) as client:
         response = client.post(PERPLEXITY_API_URL, headers=headers, json=payload)
         if response.status_code >= 400:
             logger.error(
@@ -265,11 +267,12 @@ def call_ollama_json(
             },
         ],
         "stream": False,
+        "think": True,
     }
 
     try:
-        with httpx.Client(timeout=120) as client:
-            response = client.post(f"{OLLAMA_BASE_URL}/api/chat", json=payload)
+        with httpx.Client(timeout=180) as client:
+            response = client.post(f"{OLLAMA_BASE_URL}api/chat", json=payload)
             response.raise_for_status()
             data = response.json()
     except Exception as exc:
@@ -409,7 +412,7 @@ def generate_user_stories(product_idea: str, prd_summary: str | None) -> str:
     )
     user_prompt = (
         f"Idea: {product_idea}.\nPRD context: {prd_summary or 'Unavailable.'}\n"
-        "Produce 3-4 user stories plus a short backlog list."
+        " Produce 3-4 user stories plus a short backlog list."
     )
     parsed = call_ollama_json(system_prompt, user_prompt, schema_description)
     if not parsed and PERPLEXITY_API_KEY:
@@ -473,11 +476,12 @@ def fallback_user_stories(product_idea: str) -> str:
 def generate_user_flow_diagram(product_idea: str, user_stories: str | None) -> str:
     schema_description = "{\"mermaid\":string,\"notes\":string}"
     system_prompt = (
-        "You are a senior UX designer. Produce a concise Mermaid user flow with nodes and decision points."
+        "You are a senior UX designer, producing a concise Mermaid user flow with nodes and decision points."
+        " Focus on the main user stories and acceptance criteria to outline the key journey."
     )
     user_prompt = (
         f"Idea: {product_idea}.\nUser stories:\n{user_stories or 'Unavailable.'}\n"
-        "Return Mermaid flowchart text with 4-6 nodes max. A single code block only."
+        " Return Mermaid flowchart text with 4-6 nodes max. A single code block only."
     )
     parsed = call_ollama_json(system_prompt, user_prompt, schema_description)
     if parsed and parsed.get("mermaid"):
@@ -501,12 +505,13 @@ def fallback_user_flow_diagram(product_idea: str) -> str:
 def generate_wireframe_html(product_idea: str, user_stories: str | None) -> str:
     schema_description = "{\"layout\":string}"
     system_prompt = (
-        "You are a UX designer delivering low-fidelity HTML + Tailwind markup."
-        " Use semantic sections, headings, and placeholder CTAs."
+        "You are a technical product designer delivering low-fidelity HTML + Tailwind CSS markup."
+        " Use semantic sections, headings, and placeholder CTAs to produce a clean wireframe layout for the following idea."
+        " Focus on key journeys and actions from the user stories."
     )
     user_prompt = (
         f"Idea: {product_idea}.\nUser stories:\n{user_stories or 'Unavailable.'}\n"
-        "Output only HTML markup, max ~60 lines, ready for a Tailwind sandbox."
+        " Output only HTML markup, max ~60 lines, ready for a Tailwind sandbox, no comments."
     )
     parsed = call_ollama_json(system_prompt, user_prompt, schema_description)
     if parsed and parsed.get("layout"):
@@ -568,7 +573,7 @@ def run_duckduckgo_research(product_idea: str) -> str:
                         region="us-en",
                         safesearch="off",
                         timelimit="y",
-                        backend="auto",
+                        backend="html",
                     )
                 )
             elif source == "news":
@@ -679,7 +684,7 @@ async def initialize_graph():
     )
     app_graph = workflow.compile(
         checkpointer=memory_saver,
-        interrupt_before=["product_prd", "product_stories", "approved"]
+        interrupt_before=["product_prd", "product_stories", "ux_design", "approved"]
     )
 
 
@@ -689,7 +694,7 @@ def get_app_graph():
     return app_graph
 
 # --- FastAPI Application ---
-app = FastAPI(title="Multi-Agent Product Squad API", version="1.0.0")
+app = FastAPI(title="Multi-Agent Product Squad API", version="1.3.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
