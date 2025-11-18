@@ -20,7 +20,7 @@ Deliver a full “scoped shipped package” for every validated idea, including 
 - **Human (You):** Reviews research, PRDs, stories, and code; approves/rejects or edits outputs using the web UI.
 - **Research Agent:** Calls Perplexity (`sonar-pro`) when `PERPLEXITY_API_KEY` is available, otherwise falls back to DuckDuckGo (`ddgs`) to provide research summaries with opportunities, risks, and references.
 - **Product Agent:** Drafts PRDs (exec summary, opportunity, needs, scope, success metrics) and user stories with acceptance criteria before passing control to UX.
-- **UX/Designer Agent (forthcoming):** Will produce Mermaid user flows and HTML/Tailwind wireframes once the Product work is approved.
+- **UX/Designer Agent:** Produces Mermaid user flows and HTML/Tailwind wireframes once Product work is approved, pausing for HITL sign-off before engineering picks it up.
 - **Engineering Agent (forthcoming):** Will generate working prototypes and backend logic.
 - **QA Agent (forthcoming):** Will review generated code for bugs, regressions, and quality issues.
 - **GTM Agent (forthcoming):** Will write final README.md and packaging notes before marking the task as shipped.

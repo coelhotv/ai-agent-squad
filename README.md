@@ -25,6 +25,7 @@ Refer to `DOCS/setup.md` for environment variables, dependency notes, and option
 
 - `/start_task` creates a task, kicks off the research node, and persists the initial row in `tasks.db`.
 - Research (Perplexity → DuckDuckGo) writes summaries, then the Product agent drafts PRDs and stories, each pausing via `respond_to_approval`.
+- The UX agent now follows the Product steps, generating a Mermaid.js flow and Tailwind wireframe for approval before the work is marked `ready_for_engineering`.
 - The refreshed intake UI shows a real-time status pill, workflow stage cards, and the latest response message directly beneath the submission card to keep operators oriented.
 - `tasks.html` polls `/tasks` every five seconds and offers an export button that hits `/tasks/export`.
 

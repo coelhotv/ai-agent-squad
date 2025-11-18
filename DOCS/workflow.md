@@ -39,13 +39,23 @@ After Research is approved via the UI, `POST /respond_to_approval` resumes the g
 
 Each pause is captured in `checkpoints.sqlite`, so crashes/resets do not lose context.
 
-### 4. Watching the Dashboard
+### 4. UX / Design Stage (Phase 4)
 
-`tasks.html` renders the full table of tasks with elastic columns and proper status badges. The manual refresh button hits `GET /tasks`, while auto polling keeps data fresh. Export everything at once with `GET /tasks/export` (via the **Export CSV** button). Artifact collapsibles on the main intake page mirror the latest research, PRD, and story content so approvers can stay in one place.
+Once the stories are approved, the UX agent runs automatically:
 
-### 5. Next Specialist Phases
+1. `ux_design_node` generates a Mermaid user flow (`user_flow_diagram`) and a Tailwind-compatible HTML wireframe (`wireframe_html`).
+2. The UI surfaces both artifacts in new collapsible boxes—one renders the Mermaid preview inline, the other shows the raw Tailwind markup.
+3. Status changes to `pending_ux_approval`, and the agent waits for HITL sign-off. On approval, the workflow marks the task `ready_for_engineering`.
 
-Currently `status="ready_for_ux"` marks the handoff to the upcoming UX agent (Mermaid flows + Tailwind wireframes). Future nodes (Engineering, QA, GTM) will keep the same pattern:
+All UX outputs are stored in `tasks.db`, listed on `/tasks_dashboard`, and included in `/tasks/export`.
+
+### 5. Watching the Dashboard
+
+`tasks.html` renders the full table of tasks with elastic columns and proper status badges. The manual refresh button hits `GET /tasks`, while auto polling keeps data fresh. Export everything at once with `GET /tasks/export` (via the **Export CSV** button). Artifact collapsibles on the main intake page mirror the latest research, PRD, story, flow, and wireframe content so approvers can stay in one place.
+
+### 6. Next Specialist Phases
+
+With Phase 4 live, the graph now pauses at `status="ready_for_engineering"` after the UX approval. Future nodes (Engineering, QA, GTM) will keep the same pattern:
 
 - Produce structured output.
 - Save it to the task record.

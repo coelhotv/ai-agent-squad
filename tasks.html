@@ -76,6 +76,13 @@
         tr:nth-child(even) {
             background-color: #111827;
         }
+        pre {
+            margin: 0;
+            white-space: pre-wrap;
+            font-size: 0.75rem;
+            font-family: Menlo, Consolas, monospace;
+            color: #cbd5f5;
+        }
         .status {
             font-weight: 600;
             letter-spacing: 0.02em;
@@ -176,6 +183,8 @@
                     <td>${escapeHtml(task.prd_summary || '')}</td>
                     <td>${escapeHtml(task.user_stories || '')}</td>
                     <td>${escapeHtml(task.pending_approval_content || '')}</td>
+                    <td><pre>${escapeHtml(task.user_flow_diagram || '')}</pre></td>
+                    <td><pre>${escapeHtml(task.wireframe_html || '')}</pre></td>
                 </tr>
             `).join('');
 
@@ -191,6 +200,8 @@
                                 <th>PRD Summary</th>
                                 <th>User Stories</th>
                                 <th>Pending Approval Content</th>
+                                <th>User Flow Diagram</th>
+                                <th>Wireframe HTML</th>
                             </tr>
                         </thead>
                         <tbody>

@@ -210,6 +210,37 @@
             line-height: 1.4;
             white-space: pre-wrap;
         }
+        .ux-card {
+            flex: 1;
+            min-width: 260px;
+            background: white;
+            border-radius: 16px;
+            border: 1px solid rgba(148, 163, 184, 0.35);
+            padding: 0.9rem;
+            box-shadow: 0 10px 20px rgba(15, 23, 42, 0.08);
+            display: flex;
+            flex-direction: column;
+            gap: 0.65rem;
+        }
+        .ux-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+        }
+        .ux-actions button {
+            flex: 1;
+            min-width: 140px;
+            background-color: #0ea5e9;
+            box-shadow: 0 12px 22px rgba(14, 165, 233, 0.35);
+        }
+        .ux-actions button.secondary {
+            background-color: #ec4899;
+            box-shadow: 0 12px 22px rgba(236, 72, 153, 0.35);
+        }
+        .ux-actions button:disabled {
+            background-color: #94a3b8;
+            box-shadow: none;
+        }
         #response-message {
             padding: 1rem 1.25rem;
             border-radius: 16px;
@@ -229,6 +260,49 @@
             background: #fee2e2;
             border-color: #fca5a5;
             color: #991b1b;
+        }
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(15, 23, 42, 0.65);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 50;
+        }
+        .modal-overlay.hidden {
+            display: none;
+        }
+        .modal-content {
+            width: min(900px, 90%);
+            max-height: 90vh;
+            overflow: auto;
+            background: white;
+            border-radius: 24px;
+            padding: 1.5rem;
+            position: relative;
+            box-shadow: 0 35px 70px rgba(15, 23, 42, 0.35);
+        }
+        .modal-close {
+            position: absolute;
+            top: 1rem;
+            right: 1rem;
+            border: none;
+            background: transparent;
+            font-size: 1.4rem;
+            cursor: pointer;
+            color: #0f172a;
+        }
+        .modal-heading {
+            margin: 0 0 1rem;
+            font-size: 1.35rem;
+        }
+        .modal-body pre {
+            background: #0f172a;
+            color: #f8fafc;
+            padding: 1rem;
+            border-radius: 12px;
+            overflow: auto;
         }
         @media (max-width: 768px) {
             body {
@@ -304,12 +378,32 @@
                     <summary>User Stories & Acceptance Criteria</summary>
                     <pre id="stories-content">No stories yet.</pre>
                 </details>
+                <div class="ux-card">
+                    <h3>UX Artifacts</h3>
+                    <p>Preview Mermaid flows and Tailwind wireframes inside a modal viewer.</p>
+                    <div class="ux-actions">
+                        <button type="button" id="view-flow-btn" disabled>View Flow Diagram</button>
+                        <button type="button" id="view-wireframe-btn" class="secondary" disabled>View Wireframe</button>
+                    </div>
+                </div>
             </div>
         </section>
 
+        <div id="artifact-modal" class="modal-overlay hidden">
+            <div class="modal-content">
+                <button id="close-modal" class="modal-close" aria-label="Close">&times;</button>
+                <h3 id="modal-title" class="modal-heading"></h3>
+                <div id="modal-body" class="modal-body">No content yet.</div>
+            </div>
+        </div>
+
     </div>
 
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
     <script>
+        if (window.mermaid) {
+            window.mermaid.initialize({ startOnLoad: false, securityLevel: "strict", theme: "neutral" });
+        }
         const API_BASE_URL = window.location.origin;
         const ideaForm = document.getElementById('idea-form');
         const productIdeaTextarea = document.getElementById('product-idea');
@@ -325,17 +419,26 @@
         const currentAgentLabel = document.getElementById('current-agent-label');
         const workflowFlow = document.getElementById('workflow-flow');
         const refreshQueueBtn = document.getElementById('force-refresh-btn');
+        const viewFlowBtn = document.getElementById('view-flow-btn');
+        const viewWireframeBtn = document.getElementById('view-wireframe-btn');
+        const modalOverlay = document.getElementById('artifact-modal');
+        const modalTitle = document.getElementById('modal-title');
+        const modalBody = document.getElementById('modal-body');
+        const closeModalBtn = document.getElementById('close-modal');
 
         let currentTaskId = null;
         let pollingIntervalId = null;
         let currentStatus = 'starting';
+        let storedFlowDiagram = null;
+        let storedWireframeHtml = null;
 
         const workflowSteps = [
             { key: 'starting', label: 'Intake', description: 'Idea capture' },
             { key: 'pending_research_approval', label: 'Research', description: 'Research summary' },
             { key: 'pending_prd_approval', label: 'PRD', description: 'Product requirements' },
             { key: 'pending_story_approval', label: 'User Stories', description: 'Stories & ACs' },
-            { key: 'ready_for_ux', label: 'UX Handoff', description: 'Flowcharts & wireframes' },
+            { key: 'pending_ux_approval', label: 'UX Design', description: 'Flows & wireframes' },
+            { key: 'ready_for_engineering', label: 'Engineering Handoff', description: 'Build sprint ready' },
             { key: 'completed', label: 'Shipped', description: 'Final deliverables' },
             { key: 'rejected', label: 'Rejected', description: 'Manual review' },
         ];
@@ -345,7 +448,8 @@
             pending_research_approval: 'Research Agent',
             pending_prd_approval: 'Product Agent',
             pending_story_approval: 'Product Agent',
-            ready_for_ux: 'UX Designer',
+            pending_ux_approval: 'UX Designer',
+            ready_for_engineering: 'Engineering Agent',
             completed: 'GTM Agent',
             rejected: 'Coordinator (Manual review)',
         };
@@ -391,6 +495,8 @@
             renderArtifact(researchContent, null);
             renderArtifact(prdContent, null);
             renderArtifact(storiesContent, null);
+            renderFlowDiagram(null);
+            renderWireframe(null);
         }
 
         ideaForm.addEventListener('submit', async (e) => {
@@ -446,6 +552,8 @@
                     renderArtifact(researchContent, data.research_summary);
                     renderArtifact(prdContent, data.prd_summary);
                     renderArtifact(storiesContent, data.user_stories);
+                    renderFlowDiagram(data.user_flow_diagram);
+                    renderWireframe(data.wireframe_html);
                     updateCurrentStage(data.status);
                     stopPolling();
                 } else {
@@ -458,6 +566,47 @@
 
         function renderArtifact(element, text) {
             element.textContent = text?.trim() || 'No content yet.';
+        }
+
+        function renderFlowDiagram(diagramText) {
+            storedFlowDiagram = diagramText?.trim() || null;
+            viewFlowBtn.disabled = !storedFlowDiagram;
+        }
+
+        function renderWireframe(htmlText) {
+            storedWireframeHtml = htmlText?.trim() || null;
+            viewWireframeBtn.disabled = !storedWireframeHtml;
+        }
+
+        function openModal(type) {
+            modalOverlay.classList.remove('hidden');
+            if (type === 'flow') {
+                modalTitle.textContent = 'User Flow Diagram';
+                if (storedFlowDiagram && window.mermaid) {
+                    const renderId = `mermaid-${Date.now()}`;
+                    try {
+                        window.mermaid.render(renderId, storedFlowDiagram, (svgCode) => {
+                            modalBody.innerHTML = svgCode;
+                        });
+                    } catch (error) {
+                        console.error('Mermaid render error:', error);
+                        modalBody.innerHTML = `<p>Unable to render diagram.</p><pre>${storedFlowDiagram}</pre>`;
+                    }
+                } else {
+                    modalBody.textContent = 'No diagram available yet.';
+                }
+            } else if (type === 'wireframe') {
+                modalTitle.textContent = 'Wireframe (Tailwind HTML)';
+                modalBody.innerHTML = storedWireframeHtml
+                    ? `<pre>${storedWireframeHtml.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</pre>`
+                    : 'No wireframe available yet.';
+            }
+        }
+
+        function closeModal() {
+            modalOverlay.classList.add('hidden');
+            modalBody.innerHTML = 'No content yet.';
+            modalTitle.textContent = '';
         }
 
         function startPolling() {
@@ -485,12 +634,12 @@
                 if (!response.ok) throw new Error('Unable to respond to approval.');
                 const data = await response.json();
                 updateCurrentStage(data.status);
-                if (["pending_research_approval", "pending_prd_approval", "pending_story_approval", "pending_approval"].includes(data.status)) {
+                if (["pending_research_approval", "pending_prd_approval", "pending_story_approval", "pending_ux_approval", "pending_approval"].includes(data.status)) {
                     showMessage(`Task ${data.task_id} advanced to ${data.status}. Waiting for the next approval.`);
                     currentTaskId = data.task_id;
                     startPolling();
-                } else if (data.status === 'ready_for_ux') {
-                    showMessage(`Task ${data.task_id} is ready for UX/Design.`);
+                } else if (data.status === 'ready_for_engineering') {
+                    showMessage(`Task ${data.task_id} is ready for Engineering.`);
                     currentTaskId = null;
                 } else if (data.status === 'rejected') {
                     showMessage(`Task ${data.task_id} was rejected. Manual review required.`, true);
@@ -507,6 +656,14 @@
         approveBtn.addEventListener('click', () => respondToApproval(true));
         rejectBtn.addEventListener('click', () => respondToApproval(false));
         refreshQueueBtn.addEventListener('click', pollForApprovals);
+        viewFlowBtn.addEventListener('click', () => openModal('flow'));
+        viewWireframeBtn.addEventListener('click', () => openModal('wireframe'));
+        closeModalBtn.addEventListener('click', closeModal);
+        modalOverlay.addEventListener('click', (event) => {
+            if (event.target === modalOverlay) {
+                closeModal();
+            }
+        });
 
         renderWorkflow(currentStatus);
         updateCurrentStage(currentStatus);

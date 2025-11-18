@@ -56,6 +56,8 @@ class Task(Base):
     research_summary = Column(Text, nullable=True)
     prd_summary = Column(Text, nullable=True)
     user_stories = Column(Text, nullable=True)
+    user_flow_diagram = Column(Text, nullable=True)
+    wireframe_html = Column(Text, nullable=True)
 
 Base.metadata.create_all(bind=engine)
 
@@ -66,7 +68,7 @@ def ensure_column(column_name: str):
         with engine.connect() as conn:
             conn.execute(text(f"ALTER TABLE tasks ADD COLUMN {column_name} TEXT"))
 
-for col_name in ("research_summary", "prd_summary", "user_stories"):
+for col_name in ("research_summary", "prd_summary", "user_stories", "user_flow_diagram", "wireframe_html"):
     ensure_column(col_name)
 
 def get_db():
@@ -85,6 +87,8 @@ class AgentState(TypedDict):
     research_summary: Optional[str]
     prd_summary: Optional[str]
     user_stories: Optional[str]
+    user_flow_diagram: Optional[str]
+    wireframe_html: Optional[str]
 
 # Keep the async connection open for the lifetime of the app and close on shutdown.
 _checkpointer_stack = AsyncExitStack()
@@ -466,6 +470,78 @@ def fallback_user_stories(product_idea: str) -> str:
     )
 
 
+def generate_user_flow_diagram(product_idea: str, user_stories: str | None) -> str:
+    schema_description = "{\"mermaid\":string,\"notes\":string}"
+    system_prompt = (
+        "You are a senior UX designer. Produce a concise Mermaid user flow with nodes and decision points."
+    )
+    user_prompt = (
+        f"Idea: {product_idea}.\nUser stories:\n{user_stories or 'Unavailable.'}\n"
+        "Return Mermaid flowchart text with 4-6 nodes max. A single code block only."
+    )
+    parsed = call_ollama_json(system_prompt, user_prompt, schema_description)
+    if parsed and parsed.get("mermaid"):
+        return parsed["mermaid"]
+    return fallback_user_flow_diagram(product_idea)
+
+
+def fallback_user_flow_diagram(product_idea: str) -> str:
+    return (
+        "flowchart TD\n"
+        "  Awareness[User hears about product] --> Landing[Visit idea page]\n"
+        "  Landing --> Evaluate{Fits need?}\n"
+        "  Evaluate -- yes --> Submit[Submit pilot request]\n"
+        "  Evaluate -- no --> Collect[Collect feedback]\n"
+        "  Submit --> Squad[Squad reviews request]\n"
+        "  Squad --> Onboard[Onboard + kickoff]\n"
+        f"  Onboard --> Value[Experience '{product_idea}' value]\n"
+    )
+
+
+def generate_wireframe_html(product_idea: str, user_stories: str | None) -> str:
+    schema_description = "{\"layout\":string}"
+    system_prompt = (
+        "You are a UX designer delivering low-fidelity HTML + Tailwind markup."
+        " Use semantic sections, headings, and placeholder CTAs."
+    )
+    user_prompt = (
+        f"Idea: {product_idea}.\nUser stories:\n{user_stories or 'Unavailable.'}\n"
+        "Output only HTML markup, max ~60 lines, ready for a Tailwind sandbox."
+    )
+    parsed = call_ollama_json(system_prompt, user_prompt, schema_description)
+    if parsed and parsed.get("layout"):
+        return parsed["layout"]
+    return fallback_wireframe_html(product_idea)
+
+
+def fallback_wireframe_html(product_idea: str) -> str:
+    return (
+        "<div class=\"min-h-screen bg-slate-900 text-slate-100 p-8\">\n"
+        "  <header class=\"max-w-4xl mx-auto bg-slate-800 px-6 py-4 rounded-2xl\">\n"
+        f"    <p class=\"text-sm uppercase tracking-widest text-slate-400\">Concept</p>\n"
+        f"    <h1 class=\"text-2xl font-semibold\">{product_idea}</h1>\n"
+        "  </header>\n"
+        "  <main class=\"max-w-4xl mx-auto mt-6 grid gap-4 md:grid-cols-2\">\n"
+        "    <section class=\"bg-slate-800 rounded-2xl p-4\">\n"
+        "      <h2 class=\"text-lg font-medium mb-2\">Key Journey</h2>\n"
+        "      <ul class=\"space-y-2 text-sm\">\n"
+        "        <li class=\"flex items-start gap-2\"><span class=\"mt-1 h-2 w-2 rounded-full bg-emerald-400\"></span>Discover opportunity</li>\n"
+        "        <li class=\"flex items-start gap-2\"><span class=\"mt-1 h-2 w-2 rounded-full bg-emerald-400\"></span>Submit pilot request</li>\n"
+        "        <li class=\"flex items-start gap-2\"><span class=\"mt-1 h-2 w-2 rounded-full bg-emerald-400\"></span>Track deliverables</li>\n"
+        "      </ul>\n"
+        "    </section>\n"
+        "    <section class=\"bg-slate-800 rounded-2xl p-4\">\n"
+        "      <h2 class=\"text-lg font-medium mb-2\">Actions</h2>\n"
+        "      <div class=\"space-y-3\">\n"
+        "        <button class=\"w-full rounded-xl bg-emerald-500/20 px-4 py-3 text-left\">Start Task</button>\n"
+        "        <button class=\"w-full rounded-xl bg-slate-700 px-4 py-3 text-left\">Review Tasks</button>\n"
+        "      </div>\n"
+        "    </section>\n"
+        "  </main>\n"
+        "</div>\n"
+    )
+
+
 def run_duckduckgo_research(product_idea: str) -> str:
     """Fallback DuckDuckGo search with multiple strategies."""
     def format_results(results):
@@ -559,9 +635,24 @@ def product_stories_node(state: AgentState):
     return state
 
 
+def ux_design_node(state: AgentState):
+    logger.info(f"--- Node: ux_design_node (Task ID: {state['task_id']}) ---")
+    state['user_flow_diagram'] = generate_user_flow_diagram(
+        state['product_idea'], state.get('user_stories')
+    )
+    state['wireframe_html'] = generate_wireframe_html(
+        state['product_idea'], state.get('user_stories')
+    )
+    state['status'] = "pending_ux_approval"
+    state['pending_approval_content'] = (
+        "Review the UX flow and wireframe. Approve to hand off to engineering."
+    )
+    return state
+
+
 def approved_node(state: AgentState):
     logger.info(f"--- Node: approved_node (Task ID: {state['task_id']}) ---")
-    state['status'] = "ready_for_ux"
+    state['status'] = "ready_for_engineering"
     state['pending_approval_content'] = None
     return state
 
@@ -570,11 +661,13 @@ workflow = StateGraph(AgentState)
 workflow.add_node("research", research_node)
 workflow.add_node("product_prd", product_prd_node)
 workflow.add_node("product_stories", product_stories_node)
+workflow.add_node("ux_design", ux_design_node)
 workflow.add_node("approved", approved_node)
 workflow.set_entry_point("research")
 workflow.add_edge("research", "product_prd")
 workflow.add_edge("product_prd", "product_stories")
-workflow.add_edge("product_stories", "approved")
+workflow.add_edge("product_stories", "ux_design")
+workflow.add_edge("ux_design", "approved")
 workflow.add_edge("approved", END)
 
 
@@ -630,6 +723,8 @@ class TaskStatus(BaseModel):
     research_summary: Optional[str] = None
     prd_summary: Optional[str] = None
     user_stories: Optional[str] = None
+    user_flow_diagram: Optional[str] = None
+    wireframe_html: Optional[str] = None
     class Config:
         from_attributes = True
 
@@ -664,6 +759,8 @@ async def start_task(request: StartTaskRequest, db: Session = Depends(get_db)):
         research_summary=None,
         prd_summary=None,
         user_stories=None,
+        user_flow_diagram=None,
+        wireframe_html=None,
     )
     config = {"configurable": {"thread_id": task_id}}
 
@@ -682,6 +779,8 @@ async def start_task(request: StartTaskRequest, db: Session = Depends(get_db)):
     db_task.research_summary = interrupted_state.values.get('research_summary')
     db_task.prd_summary = interrupted_state.values.get('prd_summary')
     db_task.user_stories = interrupted_state.values.get('user_stories')
+    db_task.user_flow_diagram = interrupted_state.values.get('user_flow_diagram')
+    db_task.wireframe_html = interrupted_state.values.get('wireframe_html')
     db.commit()
     db.refresh(db_task)
     logger.info(f"Task {task_id} updated in DB to status '{db_task.status}'.")
@@ -694,6 +793,7 @@ def get_pending_approval(db: Session = Depends(get_db)):
         "pending_research_approval",
         "pending_prd_approval",
         "pending_story_approval",
+        "pending_ux_approval",
         "pending_approval",  # backward compatibility
     ]
     pending_task = (
@@ -725,6 +825,8 @@ def export_tasks(db: Session = Depends(get_db)):
             "Research Summary",
             "PRD Summary",
             "User Stories",
+            "User Flow Diagram",
+            "Wireframe HTML",
             "Pending Approval Content",
         ]
     )
@@ -737,6 +839,8 @@ def export_tasks(db: Session = Depends(get_db)):
                 task.research_summary or "",
                 task.prd_summary or "",
                 task.user_stories or "",
+                task.user_flow_diagram or "",
+                task.wireframe_html or "",
                 task.pending_approval_content or "",
             ]
         )
@@ -753,6 +857,7 @@ async def respond_to_approval(request: RespondToApprovalRequest, db: Session = D
         "pending_research_approval",
         "pending_prd_approval",
         "pending_story_approval",
+        "pending_ux_approval",
         "pending_approval",
     }
     db_task = db.query(Task).filter(Task.task_id == request.task_id).first()
@@ -783,7 +888,8 @@ async def respond_to_approval(request: RespondToApprovalRequest, db: Session = D
     db_task.research_summary = final_state.get('research_summary', db_task.research_summary)
     db_task.prd_summary = final_state.get('prd_summary', db_task.prd_summary)
     db_task.user_stories = final_state.get('user_stories', db_task.user_stories)
-    db_task.research_summary = final_state.get('research_summary', db_task.research_summary)
+    db_task.user_flow_diagram = final_state.get('user_flow_diagram', db_task.user_flow_diagram)
+    db_task.wireframe_html = final_state.get('wireframe_html', db_task.wireframe_html)
     db.commit()
     logger.info(f"Task {request.task_id} updated in DB to final status '{db_task.status}'.")
     

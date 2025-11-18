@@ -26,25 +26,14 @@ Each phase represents a major milestone in the Multi-Agent Product Squad. Status
 - Research summary stored in both DB and LangGraph state.
 - UI surfaces pending research and requires HITL approval before continuing.
 
+### Phase 4 – Design Sprint (✅)
+
+- Product agent drafts PRDs and user stories with two HITL approvals.
+- UX/Designer agent generates Mermaid flows + Tailwind wireframes, surfaces them in the UI, and pauses for approval before the task becomes `ready_for_engineering`.
+- Artifacts are persisted (`user_flow_diagram`, `wireframe_html`) and exposed via `/tasks_dashboard` and CSV export.
+- Main intake UI now highlights workflow stages, status messages, and inline diagram previews so operators can guide the process from one screen.
+
 ## In Progress
-
-### Phase 4 – Design Sprint (🟡)
-
-Objective: Add Product/UX agents that deliver PRDs, user stories, and design artifacts.
-
-Current work:
-- Product agent now drafts PRDs and user stories with two HITL approvals.
-- Dashboard refreshed with elastic table layout and export CSV.
-
-Next steps:
-1. Define UX prompts for Mermaid.js flows + HTML/Tailwind wireframes.
-2. Create UX node that pauses for HITL approval before handing off to Engineering.
-3. Capture wireframes/flows in `tasks.db` and checkpoint state.
-
-Acceptance:
-- UX artifacts generated on first approval.
-- Human approval UI reflects new artifacts.
-- Checkpointer stores UX progress for reliable resumes.
 
 ## Future Phases
 
