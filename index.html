@@ -129,27 +129,18 @@
                     if (data.research_summary) {
                         researchContent.textContent = data.research_summary;
                         researchSection.classList.remove('hidden');
-                    } else {
-                        researchSection.classList.add('hidden');
                     }
                     if (data.prd_summary) {
                         prdContent.textContent = data.prd_summary;
                         prdSection.classList.remove('hidden');
-                    } else {
-                        prdSection.classList.add('hidden');
                     }
                     if (data.user_stories) {
                         storiesContent.textContent = data.user_stories;
                         storiesSection.classList.remove('hidden');
-                    } else {
-                        storiesSection.classList.add('hidden');
                     }
                     stopPolling(); // Stop polling once we have a task to approve
                 } else {
                     approvalSection.classList.add('hidden');
-                    researchSection.classList.add('hidden');
-                    prdSection.classList.add('hidden');
-                    storiesSection.classList.add('hidden');
                 }
             } catch (error) {
                 // Don't show polling errors to avoid spamming the user
@@ -178,9 +169,6 @@
             // --- FIX: Hide the approval section immediately ---
             // This prevents the polling function from re-showing it during the request.
             approvalSection.classList.add('hidden');
-            researchSection.classList.add('hidden');
-            prdSection.classList.add('hidden');
-            storiesSection.classList.add('hidden');
 
             try {
                 const response = await fetch(`${API_BASE_URL}/respond_to_approval`, {
