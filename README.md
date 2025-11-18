@@ -30,6 +30,10 @@ This project uses a hybrid architecture to get the best of both worlds: performa
 
 *   **⚙️ Graph Persistence (`checkpoints.sqlite`):** LangGraph's **`AsyncSqliteSaver`** (with `aiosqlite`) is used as the checkpointer. It keeps the graph's internal state in a `checkpoints.sqlite` file so the workflow can pause and resume asynchronously without losing context.
 
+*   **🧭 Research Layer:** The Research agent first queries Perplexity's `sonar-pro` model for a structured JSON report and automatically falls back to DuckDuckGo (via `ddgs`) if the API is unavailable.
+
+*   **📝 Product Agent:** A lightweight PM agent uses the local Ollama model (default `deepseek-r1:8b-llama-distill-q4_K_M`) to draft a PRD and user stories with dual HITL checkpoints before the UX agent picks up the baton. Perplexity is only used as a fallback.
+
 *   **📜 Logging:** The application uses Python's standard `logging` module to provide structured, informative output for easier debugging.
 
 
@@ -82,6 +86,8 @@ Ensure the `requirements.txt` file includes the packages for SQLite checkpointin
 
 langgraph-checkpoint-sqlite
 aiosqlite
+ddgs
+httpx
 
 
 
@@ -93,7 +99,30 @@ aiosqlite
 
 
 
-**Note:** We initially used `langgraph[sqlite]`, but this was found to cause dependency resolution issues. The correct combination is `langgraph-checkpoint-sqlite` plus `aiosqlite`. The Research agent also depends on the `duckduckgo-search` package, which is already listed in `requirements.txt`.
+**Note:** We initially used `langgraph[sqlite]`, but this was found to cause dependency resolution issues. The correct combination is `langgraph-checkpoint-sqlite` plus `aiosqlite`. The Research agent also depends on the `ddgs` package for fallback searches and `httpx` for the Perplexity API client.
+
+### Step 2.1: Configure Perplexity (Optional but Recommended)
+
+If you have a Perplexity API key, export it so the Research agent can call the `sonar-pro` model. Without it, the system falls back to DuckDuckGo.
+
+```bash
+export PERPLEXITY_API_KEY="pplx-..."
+```
+
+When running via Docker Compose, set the same variable in your shell or `.env` so it propagates to the container.
+
+
+
+### Step 2.2: Configure Ollama (Optional)
+
+By default the Product agent uses the local `deepseek-r1:8b-llama-distill-q4_K_M` model via the native Ollama app. Set `OLLAMA_MODEL` (and optionally `OLLAMA_BASE_URL`) if you want to change the model or host:
+
+```bash
+export OLLAMA_MODEL="llama3.1:8b"
+export OLLAMA_BASE_URL="http://host.docker.internal:11434"
+```
+
+If you skip this step, the defaults defined in `app.py` are used.
 
 
 
@@ -117,7 +146,7 @@ docker-compose up -d --build
 
 ```
 
-The server will be running and accessible at `http://localhost:8000`.
+The server will be running and accessible at `http://localhost:8000`. If you exported `PERPLEXITY_API_KEY`, Docker Compose will pass it into the container automatically (see `docker-compose.yml`).
 
 ### Step 5: Monitor Tasks
 
@@ -169,31 +198,27 @@ The application now uses a much simpler and more robust workflow that relies on 
 
 
 
-3.  **Research Phase:** The Research agent queries DuckDuckGo for the product idea, summarizes the top findings, and stores that summary in the graph state.
+3.  **Research Phase:** The Research agent calls Perplexity (`sonar-pro`) for a structured JSON report (summary, opportunities, risks, references). If the API is unavailable, it falls back to DuckDuckGo and summarizes the top findings, then stores the result in the graph state.
 
 
 
-4.  **Intake Node & Pause:** The graph executes the `intake` node. It then hits the predefined `interrupt_before=["approved"]` condition and pauses. The async checkpointer automatically saves the complete state of the graph to the `checkpoints.sqlite` file.
+4.  **Product Agent – PRD Draft:** Using the research output, the Product agent (running on the local Ollama model) writes a concise PRD (exec summary, opportunity, needs, scope, success criteria) and the system pauses for human approval.
 
 
 
-5.  **Update for UI:** After the graph pauses, the `/start_task` endpoint updates the task's row in `tasks.db` to `pending_approval`, persists the research summary, and returns.
+5.  **UI Update:** The `/start_task` endpoint persists the PRD (and research summary) to `tasks.db` and returns. The web UI surfaces both artifacts and asks for approval.
 
 
 
-6.  **UI Asks for Approval:** The web UI, which polls the backend, finds the pending task, shows the research findings, and displays the "Approve" / "Reject" buttons.
+6.  **Human Decision (PRD):** Once approved, the graph resumes and the Product agent generates user stories + acceptance criteria. If you reject at any point, the task is marked as such and stored in the DB for later review.
 
 
 
-7.  **Human Decision:** You click **"Approve"**. Your decision is sent to the `/respond_to_approval` endpoint.
+7.  **Product Agent – User Stories:** After approval, the Product agent writes 3–4 stories with acceptance criteria plus a mini backlog. The workflow pauses again for human review while the UI shows the updated artifacts in collapsible sections.
 
 
 
-8.  **Workflow Resumes:** The backend invokes the graph again, passing the same `task_id` as the `thread_id`. `AsyncSqliteSaver` automatically finds the saved state for that thread and resumes the graph exactly where it left off.
-
-
-
-9.  **Workflow Completes:** The `approved` node runs, and the graph finishes. The endpoint then updates the task's status in `tasks.db` to `completed`, and the workflow ends for good.
+8.  **Second Approval:** Approving this step resumes the graph, which marks the task `ready_for_ux` so the next specialist can pick it up. Every pause/resume is handled by `AsyncSqliteSaver`, so the graph state is always persisted.
 
 
 
@@ -223,14 +248,15 @@ The application now uses a much simpler and more robust workflow that relies on 
 
 *   **Phase 3: The First Specialist - (COMPLETED)**
 
-    *   Added the Research agent that calls DuckDuckGo, summarizes findings, and stores them in both LangGraph state and `tasks.db`.
-    *   Updated the HITL UI to display research summaries before approval and surfaced the same data on the `/tasks_dashboard`.
+    *   Added the Research agent that calls Perplexity (`sonar-pro`) for structured summaries (summary, opportunities, risks, references) and automatically falls back to DuckDuckGo when needed.
+    *   Persist research results in both LangGraph state and `tasks.db`, then surface them in the HITL UI and `/tasks_dashboard` for approval context.
 
 
 
-*   **Phase 4: The Design Sprint**
+*   **Phase 4: The Design Sprint - (IN PROGRESS)**
 
-    *   Adding "Product" (specs) and "UX/Designer" (Mermaid, HTML) agents.
+    *   Added the Product agent that creates the PRD and initial user stories with two HITL checkpoints before handing off to UX.
+    *   Next up: add the UX/Designer agent (Mermaid user flow + HTML/Tailwind wireframes).
 
 
 

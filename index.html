@@ -13,8 +13,9 @@
         button:hover { background-color: #0056b3; }
         #approval-section { margin-top: 2em; padding: 1em; background-color: #fffbe6; border: 1px solid #ffe58f; border-radius: 4px; }
         #approval-section.hidden { display: none; }
-        #research-results { margin-top: 1em; padding: 0.8em; background-color: #f0fdfa; border: 1px solid #5eead4; border-radius: 4px; }
-        #research-results.hidden { display: none; }
+        #research-results, #prd-results, #stories-results { margin-top: 1em; background-color: #f0fdfa; border: 1px solid #5eead4; border-radius: 4px; }
+        #research-results.hidden, #prd-results.hidden, #stories-results.hidden { display: none; }
+        summary { cursor: pointer; font-weight: 600; padding: 0.5em; }
         pre { white-space: pre-wrap; word-wrap: break-word; font-family: Menlo, Consolas, monospace; background: #f8fafc; padding: 0.8em; border-radius: 4px; border: 1px solid #e2e8f0; }
         #response-message { margin-top: 1em; padding: 1em; border-radius: 4px; }
         #response-message.success { background-color: #e6ffed; border: 1px solid #b7ebc9; }
@@ -40,10 +41,18 @@
         <div id="approval-section" class="hidden">
             <h2>2. Pending Approval</h2>
             <p id="approval-content"></p>
-            <div id="research-results" class="hidden">
-                <h3>Research Findings</h3>
+            <details id="research-results" class="hidden">
+                <summary>Research Findings</summary>
                 <pre id="research-content"></pre>
-            </div>
+            </details>
+            <details id="prd-results" class="hidden">
+                <summary>Product Requirement Draft</summary>
+                <pre id="prd-content"></pre>
+            </details>
+            <details id="stories-results" class="hidden">
+                <summary>User Stories & Acceptance Criteria</summary>
+                <pre id="stories-content"></pre>
+            </details>
             <button id="approve-btn">Approve</button>
             <button id="reject-btn" style="background-color: #dc3545;">Reject</button>
         </div>
@@ -66,6 +75,10 @@
         const approveBtn = document.getElementById('approve-btn');
         const rejectBtn = document.getElementById('reject-btn');
         const responseMessage = document.getElementById('response-message');
+        const prdSection = document.getElementById('prd-results');
+        const prdContent = document.getElementById('prd-content');
+        const storiesSection = document.getElementById('stories-results');
+        const storiesContent = document.getElementById('stories-content');
 
         // --- Function to show messages ---
         function showMessage(message, isError = false) {
@@ -119,10 +132,24 @@
                     } else {
                         researchSection.classList.add('hidden');
                     }
+                    if (data.prd_summary) {
+                        prdContent.textContent = data.prd_summary;
+                        prdSection.classList.remove('hidden');
+                    } else {
+                        prdSection.classList.add('hidden');
+                    }
+                    if (data.user_stories) {
+                        storiesContent.textContent = data.user_stories;
+                        storiesSection.classList.remove('hidden');
+                    } else {
+                        storiesSection.classList.add('hidden');
+                    }
                     stopPolling(); // Stop polling once we have a task to approve
                 } else {
                     approvalSection.classList.add('hidden');
                     researchSection.classList.add('hidden');
+                    prdSection.classList.add('hidden');
+                    storiesSection.classList.add('hidden');
                 }
             } catch (error) {
                 // Don't show polling errors to avoid spamming the user
@@ -152,6 +179,8 @@
             // This prevents the polling function from re-showing it during the request.
             approvalSection.classList.add('hidden');
             researchSection.classList.add('hidden');
+            prdSection.classList.add('hidden');
+            storiesSection.classList.add('hidden');
 
             try {
                 const response = await fetch(`${API_BASE_URL}/respond_to_approval`, {
@@ -163,8 +192,14 @@
                 if (!response.ok) throw new Error('Failed to respond to approval.');
 
                 const data = await response.json();
-                showMessage(`Task ${data.task_id} has been ${data.status}.`);
-                currentTaskId = null;
+                if (["pending_research_approval", "pending_prd_approval", "pending_story_approval", "pending_approval"].includes(data.status)) {
+                    showMessage(`Task ${data.task_id} advanced to ${data.status}. Waiting for next approval...`);
+                    currentTaskId = data.task_id;
+                    startPolling();
+                } else {
+                    showMessage(`Task ${data.task_id} has been ${data.status}. You can review the artifacts above.`);
+                    currentTaskId = null;
+                }
             } catch (error) {
                 showMessage(error.message, true);
             }

@@ -1,3 +1,5 @@
+import os
+import json
 # --- Core Imports ---
 import uuid
 import logging
@@ -25,7 +27,8 @@ from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.ext.declarative import declarative_base
 
 # --- Research Imports ---
-from duckduckgo_search import DDGS
+from ddgs import DDGS
+import httpx
 # --- Logging Setup ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -45,17 +48,20 @@ class Task(Base):
     status = Column(String, nullable=False)
     pending_approval_content = Column(Text, nullable=True)
     research_summary = Column(Text, nullable=True)
+    prd_summary = Column(Text, nullable=True)
+    user_stories = Column(Text, nullable=True)
 
 Base.metadata.create_all(bind=engine)
 
-def ensure_research_column():
+def ensure_column(column_name: str):
     inspector = inspect(engine)
     columns = [col["name"] for col in inspector.get_columns("tasks")]
-    if "research_summary" not in columns:
+    if column_name not in columns:
         with engine.connect() as conn:
-            conn.execute(text("ALTER TABLE tasks ADD COLUMN research_summary TEXT"))
+            conn.execute(text(f"ALTER TABLE tasks ADD COLUMN {column_name} TEXT"))
 
-ensure_research_column()
+for col_name in ("research_summary", "prd_summary", "user_stories"):
+    ensure_column(col_name)
 
 def get_db():
     db = SessionLocal()
@@ -71,69 +77,460 @@ class AgentState(TypedDict):
     status: str
     pending_approval_content: Optional[str]
     research_summary: Optional[str]
+    prd_summary: Optional[str]
+    user_stories: Optional[str]
 
 # Keep the async connection open for the lifetime of the app and close on shutdown.
 _checkpointer_stack = AsyncExitStack()
+PERPLEXITY_API_KEY = os.getenv("PERPLEXITY_API_KEY")
+PERPLEXITY_API_URL = "https://api.perplexity.ai/chat/completions"
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://host.docker.internal:11434")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "deepseek-r1:8b-llama-distill-q4_K_M")
 memory_saver: Optional[AsyncSqliteSaver] = None
 app_graph = None
 
 def run_research_query(product_idea: str) -> str:
-    """Run a lightweight DuckDuckGo search and summarize the top findings."""
+    """Use Perplexity for research; fall back to DuckDuckGo if unavailable."""
+    if PERPLEXITY_API_KEY:
+        try:
+            structured = query_perplexity(product_idea)
+            if structured:
+                return structured
+        except Exception as exc:
+            logger.exception("Perplexity research failed for '%s'", product_idea)
+
+    return run_duckduckgo_research(product_idea)
+
+
+def query_perplexity(product_idea: str) -> Optional[str]:
+    json_schema = {
+        "name": "market_research",
+        "schema": {
+            "type": "object",
+            "properties": {
+                "summary": {"type": "string"},
+                "opportunities": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "title": {"type": "string"},
+                            "details": {"type": "string"},
+                        },
+                        "required": ["title", "details"],
+                    },
+                },
+                "risks": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "title": {"type": "string"},
+                            "details": {"type": "string"},
+                        },
+                        "required": ["title", "details"],
+                    },
+                },
+                "references": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "source": {"type": "string"},
+                            "url": {"type": "string"},
+                        },
+                        "required": ["source", "url"],
+                    },
+                },
+            },
+            "required": ["summary", "opportunities", "risks", "references"],
+        },
+    }
+    system_prompt = (
+        "You are a market research analyst. Analyze the idea, compare competitors,"
+        " and highlight opportunities, risks, and references."
+    )
+    user_prompt = (
+        f"Idea: {product_idea}. Provide insights for PM/UX planning."
+        " Use credible sources and cite URLs in references."
+    )
+
+    parsed = call_perplexity_json(system_prompt, user_prompt, json_schema)
+    if not parsed:
+        return None
+
+    return format_structured_summary(parsed)
+
+
+def call_perplexity_json(
+    system_prompt: str, user_prompt: str, json_schema: dict
+) -> Optional[dict]:
+    if not PERPLEXITY_API_KEY:
+        return None
+
+    payload = {
+        "model": "sonar-pro",
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        "response_format": {"type": "json_schema", "json_schema": json_schema},
+    }
+
+    headers = {
+        "Authorization": f"Bearer {PERPLEXITY_API_KEY}",
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
+
+    with httpx.Client(timeout=30) as client:
+        response = client.post(PERPLEXITY_API_URL, headers=headers, json=payload)
+        if response.status_code >= 400:
+            logger.error(
+                "Perplexity API error %s: %s",
+                response.status_code,
+                response.text[:500],
+            )
+        response.raise_for_status()
+        data = response.json()
+
+    content = data.get("choices", [{}])[0].get("message", {}).get("content")
+    if not content:
+        return None
+
+    return _extract_json(content)
+
+
+def call_ollama_json(
+    system_prompt: str, user_prompt: str, schema_description: str
+) -> Optional[dict]:
+    if not OLLAMA_MODEL:
+        return None
+
+    payload = {
+        "model": OLLAMA_MODEL,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {
+                "role": "user",
+                "content": f"{user_prompt}\nReturn ONLY valid JSON matching: {schema_description}",
+            },
+        ],
+        "stream": False,
+    }
+
     try:
-        with DDGS() as ddgs:
-            results = list(ddgs.text(product_idea, max_results=3))
+        with httpx.Client(timeout=120) as client:
+            response = client.post(f"{OLLAMA_BASE_URL}/api/chat", json=payload)
+            response.raise_for_status()
+            data = response.json()
     except Exception as exc:
-        logger.exception("Research query failed for idea '%s'", product_idea)
+        logger.exception("Ollama request failed: %s", exc)
+        return None
+
+    content = data.get("message", {}).get("content")
+    if not content:
+        return None
+
+    return _extract_json(content)
+
+
+def _extract_json(content: str) -> Optional[dict]:
+    try:
+        return json.loads(content)
+    except json.JSONDecodeError:
+        start = content.find("{")
+        end = content.rfind("}")
+        if start != -1 and end != -1:
+            try:
+                return json.loads(content[start : end + 1])
+            except json.JSONDecodeError:
+                return None
+    return None
+
+
+def format_structured_summary(data: dict) -> str:
+    lines = []
+    summary = data.get("summary")
+    if summary:
+        lines.append("Summary:\n" + summary.strip())
+
+    opportunities = data.get("opportunities") or []
+    if opportunities:
+        lines.append("\nOpportunities:")
+        for opp in opportunities:
+            title = opp.get("title") or "Opportunity"
+            details = opp.get("details") or ""
+            lines.append(f"- {title}: {details}")
+
+    risks = data.get("risks") or []
+    if risks:
+        lines.append("\nRisks:")
+        for risk in risks:
+            title = risk.get("title") or "Risk"
+            details = risk.get("details") or ""
+            lines.append(f"- {title}: {details}")
+
+    refs = data.get("references") or []
+    if refs:
+        lines.append("\nReferences:")
+        for ref in refs:
+            source = ref.get("source") or "Source"
+            url = ref.get("url") or ""
+            lines.append(f"- {source}: {url}")
+
+    return "\n".join(lines).strip()
+
+
+def generate_prd_document(product_idea: str, research_summary: str | None) -> str:
+    schema_description = (
+        "{\"executive_summary\": string, \"market_opportunity\": [string],"
+        " \"customer_needs\": [string], \"product_scope\": [string],"
+        " \"success_criteria\": [string]}"
+    )
+    system_prompt = (
+        "You are a senior PM drafting a one-page PRD. Keep it punchy and actionable."
+    )
+    user_prompt = (
+        f"Idea: {product_idea}.\nResearch summary: {research_summary or 'n/a'}."
+        " Draft the requested sections with the most important bullets first."
+    )
+    parsed = call_ollama_json(system_prompt, user_prompt, schema_description)
+    if not parsed and PERPLEXITY_API_KEY:
+        json_schema = {
+            "name": "prd_outline",
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "executive_summary": {"type": "string"},
+                    "market_opportunity": {"type": "array", "items": {"type": "string"}},
+                    "customer_needs": {"type": "array", "items": {"type": "string"}},
+                    "product_scope": {"type": "array", "items": {"type": "string"}},
+                    "success_criteria": {"type": "array", "items": {"type": "string"}},
+                },
+                "required": [
+                    "executive_summary",
+                    "market_opportunity",
+                    "customer_needs",
+                    "product_scope",
+                    "success_criteria",
+                ],
+            },
+        }
+        parsed = call_perplexity_json(system_prompt, user_prompt, json_schema)
+    if not parsed:
+        return fallback_prd(product_idea, research_summary)
+
+    lines = ["Executive Summary:", parsed.get("executive_summary", "")]
+    lines.append("\nMarket Opportunity & Positioning:")
+    for item in parsed.get("market_opportunity", [])[:3]:
+        lines.append(f"- {item}")
+    lines.append("\nCustomer Needs:")
+    for item in parsed.get("customer_needs", [])[:4]:
+        lines.append(f"- {item}")
+    lines.append("\nProduct Scope & Use Cases:")
+    for item in parsed.get("product_scope", [])[:4]:
+        lines.append(f"- {item}")
+    lines.append("\nSuccess Criteria:")
+    for item in parsed.get("success_criteria", [])[:3]:
+        lines.append(f"- {item}")
+    return "\n".join(lines).strip()
+
+
+def fallback_prd(product_idea: str, research_summary: str | None) -> str:
+    return (
+        f"Executive Summary:\nA first iteration of '{product_idea}' focused on a single"
+        " core workflow.\n\nMarket Opportunity & Positioning:\n"
+        f"- Based on research: {research_summary or 'insights pending.'}\n"
+        "- Target early adopters and gather feedback.\n\nCustomer Needs:\n"
+        "- Simple onboarding\n- Clear value communication\n- Feedback loop\n\n"
+        "Product Scope & Use Cases:\n- Pilot use case that validates demand\n"
+        "- Internal admin dashboard for basic tracking\n\nSuccess Criteria:\n"
+        "- 10 pilot sign-ups\n- 60% repeat usage in 2 weeks\n- Qualitative feedback on usability"
+    )
+
+
+def generate_user_stories(product_idea: str, prd_summary: str | None) -> str:
+    schema_description = (
+        "{\"stories\":[{\"title\":string,\"story\":string,"
+        "\"acceptance_criteria\":[string]}],\"backlog\":[string]}"
+    )
+    system_prompt = (
+        "You are a senior PM writing crisp user stories with acceptance criteria."
+        " Keep scope tight for v0 and stay within the provided PRD."
+    )
+    user_prompt = (
+        f"Idea: {product_idea}.\nPRD context: {prd_summary or 'Unavailable.'}\n"
+        "Produce 3-4 user stories plus a short backlog list."
+    )
+    parsed = call_ollama_json(system_prompt, user_prompt, schema_description)
+    if not parsed and PERPLEXITY_API_KEY:
+        json_schema = {
+            "name": "product_user_stories",
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "stories": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "title": {"type": "string"},
+                                "story": {"type": "string"},
+                                "acceptance_criteria": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                },
+                            },
+                            "required": ["title", "story", "acceptance_criteria"],
+                        },
+                    },
+                    "backlog": {"type": "array", "items": {"type": "string"}},
+                },
+                "required": ["stories", "backlog"],
+            },
+        }
+        parsed = call_perplexity_json(system_prompt, user_prompt, json_schema)
+    if not parsed:
+        return fallback_user_stories(product_idea)
+
+    lines = ["User Stories:"]
+    for entry in parsed.get("stories", [])[:4]:
+        title = entry.get("title") or "Story"
+        story_text = entry.get("story") or ""
+        lines.append(f"\n{title}\n{story_text}")
+        for criteria in entry.get("acceptance_criteria", [])[:3]:
+            lines.append(f"  - AC: {criteria}")
+
+    backlog = parsed.get("backlog", [])
+    if backlog:
+        lines.append("\nNext Iteration Backlog:")
+        for item in backlog[:3]:
+            lines.append(f"- {item}")
+
+    return "\n".join(lines).strip()
+
+
+def fallback_user_stories(product_idea: str) -> str:
+    return (
+        "User Stories:\n\n1. As a pilot customer I want to try the core flow so that I can"
+        f" see how '{product_idea}' helps me.\n  - AC: Account created\n"
+        "  - AC: Key task completed\n\n2. As an operator I want a simple"
+        " dashboard so that I can monitor usage.\n  - AC: View list of active"
+        " users\n  - AC: Export activity\n\nNext Iteration Backlog:\n- Social"
+        " proof content\n- Referral workflow"
+    )
+
+
+def run_duckduckgo_research(product_idea: str) -> str:
+    """Fallback DuckDuckGo search with multiple strategies."""
+    def format_results(results):
+        summary_lines = []
+        for idx, result in enumerate(results, start=1):
+            title = (result.get("title") or "Untitled Result").strip()
+            snippet = (result.get("body") or result.get("snippet") or "").strip()
+            url = result.get("href") or result.get("url") or result.get("link") or ""
+            line = f"{idx}. {title}"
+            if snippet:
+                line += f" — {snippet}"
+            if url:
+                line += f" ({url})"
+            summary_lines.append(line)
+        return "\n".join(summary_lines)
+
+    def search(query, source="text"):
+        with DDGS() as ddgs:
+            if source == "text":
+                return list(
+                    ddgs.text(
+                        query,
+                        max_results=5,
+                        region="us-en",
+                        safesearch="off",
+                        timelimit="y",
+                        backend="auto",
+                    )
+                )
+            elif source == "news":
+                return list(
+                    ddgs.news(
+                        query,
+                        max_results=5,
+                        region="us-en",
+                        safesearch="off",
+                    )
+                )
+            return []
+
+    queries = [
+        f"{product_idea} competitors",
+        f"{product_idea} market news",
+        f"market research for {product_idea}",
+    ]
+
+    try:
+        for idx, query in enumerate(queries):
+            source = "text" if idx != 1 else "news"
+            results = search(query, source=source)
+            if results:
+                return format_results(results)
+    except Exception as exc:
+        logger.exception("DuckDuckGo fallback failed for idea '%s'", product_idea)
         return f"Research unavailable due to error: {exc}"
 
-    if not results:
-        return "No public findings were returned for this idea."
-
-    summary_lines = []
-    for idx, result in enumerate(results, start=1):
-        title = (result.get("title") or "Untitled Result").strip()
-        snippet = (result.get("body") or result.get("snippet") or "").strip()
-        url = result.get("href") or result.get("url") or result.get("link") or ""
-        line = f"{idx}. {title}"
-        if snippet:
-            line += f" — {snippet}"
-        if url:
-            line += f" ({url})"
-        summary_lines.append(line)
-
-    return "\n".join(summary_lines)
+    return "No public findings were returned for this idea."
 
 # --- Agent Node Functions ---
-# These nodes now only focus on modifying the state dictionary.
-# The main application logic will handle database updates.
 def research_node(state: AgentState):
     logger.info(f"--- Node: research_node (Task ID: {state['task_id']}) ---")
     state['research_summary'] = run_research_query(state['product_idea'])
-    state['status'] = "research_completed"
-    return state
-
-def intake_node(state: AgentState):
-    logger.info(f"--- Node: intake_node (Task ID: {state['task_id']}) ---")
-    state['status'] = "pending_approval"
-    summary = state.get('research_summary') or "Research summary unavailable."
+    state['status'] = "pending_research_approval"
     state['pending_approval_content'] = (
-        f"Research findings for '{state['product_idea']}':\n\n{summary}\n\nApprove to proceed?"
+        f"Research completed for '{state['product_idea']}'. Review the findings and approve to start the PRD draft."
     )
     return state
 
+
+def product_prd_node(state: AgentState):
+    logger.info(f"--- Node: product_prd_node (Task ID: {state['task_id']}) ---")
+    state['prd_summary'] = generate_prd_document(
+        state['product_idea'], state.get('research_summary')
+    )
+    state['status'] = "pending_prd_approval"
+    state['pending_approval_content'] = (
+        "Review the draft PRD, make edits if needed, and approve to generate user stories."
+    )
+    return state
+
+
+def product_stories_node(state: AgentState):
+    logger.info(f"--- Node: product_stories_node (Task ID: {state['task_id']}) ---")
+    state['user_stories'] = generate_user_stories(
+        state['product_idea'], state.get('prd_summary')
+    )
+    state['status'] = "pending_story_approval"
+    state['pending_approval_content'] = (
+        "Review the initial user stories & AC. Approve to hand off to UX."
+    )
+    return state
+
+
 def approved_node(state: AgentState):
     logger.info(f"--- Node: approved_node (Task ID: {state['task_id']}) ---")
-    state['status'] = "completed"
+    state['status'] = "ready_for_ux"
+    state['pending_approval_content'] = None
     return state
 
 # --- Graph Definition ---
 workflow = StateGraph(AgentState)
 workflow.add_node("research", research_node)
-workflow.add_node("intake", intake_node)
+workflow.add_node("product_prd", product_prd_node)
+workflow.add_node("product_stories", product_stories_node)
 workflow.add_node("approved", approved_node)
 workflow.set_entry_point("research")
-workflow.add_edge("research", "intake")
-workflow.add_edge("intake", "approved")
+workflow.add_edge("research", "product_prd")
+workflow.add_edge("product_prd", "product_stories")
+workflow.add_edge("product_stories", "approved")
 workflow.add_edge("approved", END)
 
 
@@ -145,7 +542,7 @@ async def initialize_graph():
     )
     app_graph = workflow.compile(
         checkpointer=memory_saver,
-        interrupt_before=["approved"]
+        interrupt_before=["product_prd", "product_stories", "approved"]
     )
 
 
@@ -186,6 +583,8 @@ class TaskStatus(BaseModel):
     product_idea: str
     pending_approval_content: Optional[str] = None
     research_summary: Optional[str] = None
+    prd_summary: Optional[str] = None
+    user_stories: Optional[str] = None
     class Config:
         from_attributes = True
 
@@ -218,6 +617,8 @@ async def start_task(request: StartTaskRequest, db: Session = Depends(get_db)):
         status="starting",
         pending_approval_content=None,
         research_summary=None,
+        prd_summary=None,
+        user_stories=None,
     )
     config = {"configurable": {"thread_id": task_id}}
 
@@ -234,6 +635,8 @@ async def start_task(request: StartTaskRequest, db: Session = Depends(get_db)):
     db_task.status = interrupted_state.values['status']
     db_task.pending_approval_content = interrupted_state.values['pending_approval_content']
     db_task.research_summary = interrupted_state.values.get('research_summary')
+    db_task.prd_summary = interrupted_state.values.get('prd_summary')
+    db_task.user_stories = interrupted_state.values.get('user_stories')
     db.commit()
     db.refresh(db_task)
     logger.info(f"Task {task_id} updated in DB to status '{db_task.status}'.")
@@ -242,7 +645,18 @@ async def start_task(request: StartTaskRequest, db: Session = Depends(get_db)):
 
 @app.get("/get_pending_approval", response_model=Optional[TaskStatus])
 def get_pending_approval(db: Session = Depends(get_db)):
-    pending_task = db.query(Task).filter(Task.status == "pending_approval").first()
+    pending_statuses = [
+        "pending_research_approval",
+        "pending_prd_approval",
+        "pending_story_approval",
+        "pending_approval",  # backward compatibility
+    ]
+    pending_task = (
+        db.query(Task)
+        .filter(Task.status.in_(pending_statuses))
+        .order_by(Task.task_id)
+        .first()
+    )
     if pending_task:
         return TaskStatus.from_orm(pending_task)
     return None
@@ -254,12 +668,19 @@ def list_tasks(db: Session = Depends(get_db)):
 
 @app.post("/respond_to_approval", response_model=TaskStatus)
 async def respond_to_approval(request: RespondToApprovalRequest, db: Session = Depends(get_db)):
+    pending_statuses = {
+        "pending_research_approval",
+        "pending_prd_approval",
+        "pending_story_approval",
+        "pending_approval",
+    }
     db_task = db.query(Task).filter(Task.task_id == request.task_id).first()
-    if not db_task or db_task.status != 'pending_approval':
+    if not db_task or db_task.status not in pending_statuses:
         raise HTTPException(status_code=404, detail="Task not found or not pending approval.")
 
     if not request.approved:
         db_task.status = 'rejected'
+        db_task.pending_approval_content = None
         db.commit()
         logger.info(f"Task {request.task_id} rejected by human.")
         return TaskStatus.from_orm(db_task)
@@ -273,11 +694,14 @@ async def respond_to_approval(request: RespondToApprovalRequest, db: Session = D
     # 2. Invoke the graph again. The checkpointer loads the state automatically.
     # We pass `None` as the state because the checkpointer is handling it.
     final_state = await graph.ainvoke(None, config)
-    logger.info(f"Graph for task {request.task_id} finished execution.")
+    logger.info(f"Graph for task {request.task_id} advanced to state '{final_state.get('status')}'.")
 
-    # 3. Update our application DB with the final status
-    db_task.status = final_state.get('status', 'completed')
-    db_task.pending_approval_content = None
+    # 3. Update our application DB with the new status/content
+    db_task.status = final_state.get('status', db_task.status)
+    db_task.pending_approval_content = final_state.get('pending_approval_content')
+    db_task.research_summary = final_state.get('research_summary', db_task.research_summary)
+    db_task.prd_summary = final_state.get('prd_summary', db_task.prd_summary)
+    db_task.user_stories = final_state.get('user_stories', db_task.user_stories)
     db_task.research_summary = final_state.get('research_summary', db_task.research_summary)
     db.commit()
     logger.info(f"Task {request.task_id} updated in DB to final status '{db_task.status}'.")

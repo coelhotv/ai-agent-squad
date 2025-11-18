@@ -45,6 +45,8 @@ This is the most critical part of our setup. We are balancing performance with i
 
 - **Graph Persistence (`checkpoints.sqlite`):** LangGraph's **`AsyncSqliteSaver`** (with `aiosqlite`) runs as the checkpointer. It records the detailed graph state in `checkpoints.sqlite` so the workflow can pause/resume without losing context, even while the backend remains fully async.
 - **Monitoring UI:** A `/tasks_dashboard` page shows every row in `tasks.db`, updating automatically so humans can audit the workflow at any time.
+- **Perplexity Research:** When `PERPLEXITY_API_KEY` is set, the Research agent calls the Perplexity `sonar-pro` model for structured findings (summary, opportunities, risks, references), falling back to DuckDuckGo if the API call fails.
+- **Product Agent:** Builds on the research to generate a concise PRD and user stories using the local Ollama model, each requiring HITL approval before handing off to UX.
 
 - **Logging:** The application uses Python's standard `logging` module to provide structured, timestamped output. This is crucial for debugging the asynchronous and multi-step workflows.
 
@@ -56,7 +58,7 @@ This is the most critical part of our setup. We are balancing performance with i
 
 2. **The Human (You):** The "Decision Maker." Approves/rejects/edits key outputs via the web UI.
 
-3. **Research Agent:** Specialist with a web search tool to validate the idea.
+3. **Research Agent:** Specialist that calls Perplexity (`sonar-pro`) for structured findings and falls back to DuckDuckGo when needed.
 
 4. **Product Agent:** Specialist that writes product specs and user stories.
 
@@ -115,23 +117,25 @@ This is the most critical part of our setup. We are balancing performance with i
 
 - **Actions:**
 
-1. Added the `duckduckgo-search` library and helper to summarize the top SERP results.
+1. Added Perplexity integration (`sonar-pro`) with structured JSON output (summary, opportunities, risks, references) plus a DuckDuckGo fallback.
 
 2. Inserted a `research` node into the LangGraph flow ahead of the intake step, storing summaries in both checkpoint state and `tasks.db`.
 
 3. Updated the web UI and `/tasks_dashboard` to display the research findings during HITL approval.
 
-4. Noted a future enhancement to optionally swap DuckDuckGo for a Perplexity-powered research API once ready.
+4. Documented environment configuration for `PERPLEXITY_API_KEY` so the integration can run inside Docker.
 
-**Phase 4: The Design Sprint - "Product" & "UX" Agents**
+**Phase 4: The Design Sprint - "Product" & "UX" Agents - (IN PROGRESS)**
 
 - **Goal:** Add the "Product" and "UX/Designer" agents.
 
 - **Actions:**
 
-1. Add `Product_Agent` and `UX_Designer_Agent` nodes.
+1. Implemented the Product agent that drafts a concise PRD (exec summary, market opportunity, needs, scope, success) and pauses for HITL approval.
 
-2. Design prompts for generating user stories, Mermaid.js, and HTML/Tailwind.
+2. After approval, the Product agent generates initial user stories + acceptance criteria, pauses for another approval, and then hands off to the upcoming UX agent.
+
+3. Next: design prompts/output pipeline for generating Mermaid user flows and HTML/Tailwind wireframes.
 
 **Phase 5: The Build Sprint - "Engineering" & "QA" Agents**
 
