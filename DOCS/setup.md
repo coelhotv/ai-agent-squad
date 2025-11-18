@@ -39,7 +39,7 @@ These packages support LangGraph checkpoints, DuckDuckGo fallbacks, and Perplexi
 - `OLLAMA_MODEL` (optional): Defaults to `deepseek-r1:8b-llama-distill-q4_K_M`.
 - `OLLAMA_BASE_URL` (optional): Defaults to `http://host.docker.internal:11434`. Change only if your host exposes Ollama differently.
 
-Export these before running Docker (or place them in a `.env` file that `docker-compose` reads).
+Copy `.env.example` to `.env` and update values there. Docker Compose automatically loads `.env`, so you can tweak configs without rebuilding. For ad-hoc overrides, you can still export them in your shell.
 
 ## Optional: Resetting State
 

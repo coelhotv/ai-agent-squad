@@ -15,8 +15,9 @@ This repository orchestrates a LangGraph-powered **Coordinator** and a suite of 
 
 1. Install [Ollama](https://ollama.com/) and Docker Desktop.
 2. Run `ollama pull deepseek-r1:8b-llama-distill-q4_K_M`.
-3. Start the app: `docker-compose up -d --build`.
-4. Point your browser to `http://localhost:8000` for intake and `http://localhost:8000/tasks_dashboard` to watch the dashboard.
+3. Copy `.env.example` to `.env`, fill in any overrides (e.g., `PERPLEXITY_API_KEY`).
+4. Start the app: `docker-compose up -d --build`.
+5. Point your browser to `http://localhost:8000` for intake and `http://localhost:8000/tasks_dashboard` to watch the dashboard.
 
 Refer to `DOCS/setup.md` for environment variables, dependency notes, and optional local development via a Python virtual environment.
 

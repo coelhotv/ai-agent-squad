@@ -28,5 +28,6 @@
 ## Operations Notes
 
 - Approvals are the single source of truth for the graph state. When a task pauses, the UI, `tasks.db`, and `checkpoints.sqlite` all point to the same status label (`pending_research_approval`, `pending_prd_approval`, etc.).
+- Runtime configuration (Perplexity API key, Ollama URL/model, DB paths) now lives in `.env`. Update that file and run `docker-compose up -d` to apply changes without editing code; keep secrets out of source control by only committing `.env.example`.
 - For manual testing, you can post to `/respond_to_approval` with a JSON body like `{"task_id":"<id>", "approved":true}` if you need to simulate human approvals via Postman or curl.
 - Document any future maintenance steps (e.g., upgrading dependencies in `requirements.txt`) inside this doc to keep the operations runbook centralized.

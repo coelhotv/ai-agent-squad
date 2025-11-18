@@ -37,10 +37,13 @@ logger = logging.getLogger(__name__)
 # Reduce SQL logging noise (especially from dashboard polling)
 logging.getLogger('sqlalchemy.engine').setLevel(logging.WARNING)
 
+from app_settings import get_settings
+
+settings = get_settings()
+
 # --- Application Database (SQLite) ---
 # This DB stores the high-level status of tasks for the UI
-DATABASE_URL = "sqlite:////data/tasks.db"
-engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+engine = create_engine(settings.database_url, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
@@ -85,12 +88,50 @@ class AgentState(TypedDict):
 
 # Keep the async connection open for the lifetime of the app and close on shutdown.
 _checkpointer_stack = AsyncExitStack()
-PERPLEXITY_API_KEY = os.getenv("PERPLEXITY_API_KEY")
-PERPLEXITY_API_URL = "https://api.perplexity.ai/chat/completions"
-OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://host.docker.internal:11434")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "deepseek-r1:8b-llama-distill-q4_K_M")
+PERPLEXITY_API_KEY = settings.perplexity_api_key
+PERPLEXITY_API_URL = str(settings.perplexity_api_url)
+OLLAMA_BASE_URL = str(settings.ollama_base_url)
+OLLAMA_MODEL = settings.ollama_model
 memory_saver: Optional[AsyncSqliteSaver] = None
 app_graph = None
+
+
+def log_environment_status():
+    """Log useful environment and configuration details so operators know what's enabled."""
+    logger.info("Database URL: %s", settings.database_url)
+    checkpoints_path = settings.checkpoints_path
+    logger.info("Checkpoint store: %s", checkpoints_path)
+    logger.info("Ollama base URL: %s", OLLAMA_BASE_URL)
+    logger.info("Ollama model: %s", OLLAMA_MODEL)
+
+    if PERPLEXITY_API_KEY:
+        masked_key = PERPLEXITY_API_KEY[:6] + "..." if len(PERPLEXITY_API_KEY) > 6 else "***"
+        logger.info("Perplexity API key detected (%s). Research agent will attempt sonar-pro.", masked_key)
+    else:
+        logger.warning(
+            "PERPLEXITY_API_KEY is not set. Research agent will rely on DuckDuckGo fallback only."
+        )
+
+    data_dir = os.path.dirname(settings.checkpoints_path) or "/data"
+    if not os.path.exists(data_dir):
+        logger.warning("Data directory %s does not exist. Attempting to create it.", data_dir)
+        try:
+            os.makedirs(data_dir, exist_ok=True)
+            logger.info("Created missing data directory at %s.", data_dir)
+        except OSError as exc:
+            logger.error("Failed to create data directory %s: %s", data_dir, exc)
+
+    if not os.access(data_dir, os.W_OK):
+        logger.warning("Data directory %s is not writable. SQLite persistence may fail.", data_dir)
+
+    try:
+        with httpx.Client(timeout=2) as client:
+            response = client.get(f"{OLLAMA_BASE_URL}/api/tags")
+            response.raise_for_status()
+            logger.info("Successfully reached Ollama endpoint (%s).", f"{OLLAMA_BASE_URL}/api/tags")
+    except Exception as exc:
+        logger.warning("Unable to reach Ollama at %s: %s", OLLAMA_BASE_URL, exc)
+
 
 def run_research_query(product_idea: str) -> str:
     """Use Perplexity for research; fall back to DuckDuckGo if unavailable."""
@@ -541,7 +582,7 @@ async def initialize_graph():
     """Initialize the LangGraph checkpointer and compiled workflow."""
     global memory_saver, app_graph
     memory_saver = await _checkpointer_stack.enter_async_context(
-        AsyncSqliteSaver.from_conn_string("/data/checkpoints.sqlite")
+        AsyncSqliteSaver.from_conn_string(settings.checkpoints_path)
     )
     app_graph = workflow.compile(
         checkpointer=memory_saver,
@@ -567,6 +608,7 @@ app.add_middleware(
 
 @app.on_event("startup")
 async def on_startup():
+    log_environment_status()
     await initialize_graph()
     logger.info("LangGraph initialized with AsyncSqliteSaver.")
 

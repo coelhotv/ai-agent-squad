@@ -8,6 +8,7 @@ fastapi
 uvicorn
 langgraph
 sqlalchemy
+pydantic-settings
 
 # For SQLite support in LangGraph
 langgraph-checkpoint-sqlite

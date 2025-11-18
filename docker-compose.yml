@@ -11,8 +11,8 @@ services:
     working_dir: /code
     ports:
       - "8000:8000"
-    environment:
-      - PERPLEXITY_API_KEY=${PERPLEXITY_API_KEY:-}
+    env_file:
+      - .env
     restart: unless-stopped
 
 volumes:
