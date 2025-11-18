@@ -13,6 +13,7 @@ The app is purposely split between a **native LLM host** and a **containerized P
 - **`tasks.db`:** Stores what you see on `/tasks_dashboard` and `tasks.html`. Each row represents a task (status, research, PRD, stories, pending approval). `Task` models are defined in `app.py` and kept in sync with the UI.
 - **`checkpoints.sqlite`:** Maintained by `langgraph.checkpoint.sqlite.aio.AsyncSqliteSaver`. It captures the LangGraph state machine’s detailed context so graph executions (research → PRD → stories → future nodes) can pause/resume reliably.
 - **Environment resilience:** Engine uses `sqlite` with `check_same_thread=False`, and hooks `ensure_column` to evolve schema without migrations, so you can add optional fields (`research_summary`, `prd_summary`, `user_stories`) safely.
+- **Configuration:** All tunables (DB URL, checkpoint path, Ollama host/model, Perplexity API info) are loaded via `app_settings.py` (`pydantic-settings`). Update `.env` to change values without touching code; startup logs verify what the app actually loaded.
 
 ## API Surface
 

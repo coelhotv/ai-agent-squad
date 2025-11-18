@@ -17,6 +17,7 @@
 
 - FastAPI logs appear in Docker output, showing request lifecycle and approval events.
 - SQLAlchemy logging is throttled to `WARNING` level (`logging.getLogger('sqlalchemy.engine').setLevel(logging.WARNING)`) to minimize noise from frequent dashboard polling.
+- At startup the app logs a configuration summary (database URL, checkpoint path, Ollama host/model, Perplexity key presence, `/data` writability, and Ollama connectivity). Check `docker-compose logs` for these preflight messages to confirm the environment matches expectations.
 - Use `docker-compose down` to stop the app, then `docker-compose up --build` if you’ve made code changes that require a rebuild.
 - If you edit `app.py`, restart the service (`docker-compose restart app_service`) or run `uvicorn app:app --reload` for rapid iteration outside Docker.
 

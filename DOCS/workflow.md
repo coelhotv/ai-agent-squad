@@ -2,11 +2,13 @@
 
 ## End-to-End Flow
 
-The squad follows a serialized, checkpointed sequence. Each node in the LangGraph graph runs once, outputs a structured result, and then pauses for a human approval before continuing. FastAPI endpoints and the UI keep you in sync with the workflow.
+<img src="images/main-ui.png" alt="Hero intake UI" width="640">
+
+The squad follows a serialized, checkpointed sequence. Each node in the LangGraph graph runs once, outputs a structured result, and then pauses for a human approval before continuing. FastAPI endpoints and the UI keep you in sync with the workflow, and the refreshed home page shows a floating intake card, a live status pill, and workflow stage cards so you always know which agent is active.
 
 ### 1. Submit an Idea
 
-Navigate to `http://localhost:8000` (served by `index.html`), enter a product idea, and click **"Start Task"**. The browser calls `POST /start_task`, which:
+Navigate to `http://localhost:8000` (served by `index.html`), enter a product idea, and click **"Start Task"**. The hero card displays a response/status message directly beneath the form, so confirmation/error text is immediate. The browser calls `POST /start_task`, which:
 
 1. Generates a UUID `task_id`.
 2. Saves a new row to `tasks.db` with `status="starting"`.
@@ -39,7 +41,7 @@ Each pause is captured in `checkpoints.sqlite`, so crashes/resets do not lose co
 
 ### 4. Watching the Dashboard
 
-`tasks.html` renders the full table of tasks with elastic columns and proper status badges. The manual refresh button hits `GET /tasks`, while auto polling keeps data fresh. Export everything at once with `GET /tasks/export` (via the **Export CSV** button).
+`tasks.html` renders the full table of tasks with elastic columns and proper status badges. The manual refresh button hits `GET /tasks`, while auto polling keeps data fresh. Export everything at once with `GET /tasks/export` (via the **Export CSV** button). Artifact collapsibles on the main intake page mirror the latest research, PRD, and story content so approvers can stay in one place.
 
 ### 5. Next Specialist Phases
 
