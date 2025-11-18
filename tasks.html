@@ -5,29 +5,137 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Task Dashboard</title>
     <style>
-        body { font-family: sans-serif; margin: 2em; background-color: #111827; color: #f9fafb; }
-        .container { max-width: 1000px; margin: auto; }
-        table { width: 100%; border-collapse: collapse; margin-top: 1.5em; }
-        th, td { padding: 0.75em; text-align: left; border-bottom: 1px solid #374151; }
-        th { background-color: #1f2937; }
-        tr:nth-child(even) { background-color: #1f2937; }
-        .status { font-weight: bold; }
-        .status.starting { color: #60a5fa; }
-        .status.pending_approval { color: #fbbf24; }
-        .status.completed { color: #34d399; }
-        .status.rejected { color: #f87171; }
-        .status.error { color: #f87171; }
-        #refresh-status { margin-top: 1em; font-size: 0.9em; color: #9ca3af; }
-        button { margin-top: 1em; padding: 0.6em 1em; border: none; border-radius: 4px; background-color: #2563eb; color: white; cursor: pointer; }
-        button:hover { background-color: #1d4ed8; }
-        .empty { text-align: center; padding: 2em; background: #1f2937; border-radius: 8px; margin-top: 1.5em; }
+        body {
+            font-family: "Inter", "Segoe UI", system-ui, sans-serif;
+            margin: 0;
+            min-height: 100vh;
+            background-color: #0f172a;
+            color: #f8fafc;
+        }
+        .container {
+            width: min(1800px, 100%);
+            margin: 0 auto;
+            padding: 2.5rem 1.5rem 3rem;
+        }
+        h1 {
+            margin-bottom: 0.25rem;
+        }
+        p {
+            color: #cbd5f5;
+            margin-top: 0;
+        }
+        .actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.75rem;
+            margin-top: 1rem;
+        }
+        button {
+            padding: 0.65em 1.2em;
+            border: none;
+            border-radius: 6px;
+            background-color: #2563eb;
+            color: white;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background-color 0.2s ease;
+        }
+        button.secondary {
+            background-color: #0ea5e9;
+        }
+        button:hover {
+            background-color: #1d4ed8;
+        }
+        button.secondary:hover {
+            background-color: #0284c7;
+        }
+        #refresh-status {
+            margin-top: 0.75rem;
+            font-size: 0.9em;
+            color: #94a3b8;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 1.5em;
+            table-layout: auto;
+        }
+        th, td {
+            padding: 0.95em 0.75em;
+            text-align: left;
+            border-bottom: 1px solid #1f2937;
+            word-break: break-word;
+            white-space: normal;
+        }
+        th {
+            background-color: #1f2937;
+            font-size: 0.85em;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+        }
+        tr:nth-child(even) {
+            background-color: #111827;
+        }
+        .status {
+            font-weight: 600;
+            letter-spacing: 0.02em;
+        }
+        .status.starting {
+            color: #60a5fa;
+        }
+        .status.pending_approval {
+            color: #fbbf24;
+        }
+        .status.pending_research_approval,
+        .status.pending_prd_approval,
+        .status.pending_story_approval {
+            color: #fbbf24;
+        }
+        .status.completed {
+            color: #34d399;
+        }
+        .status.rejected,
+        .status.error {
+            color: #f87171;
+        }
+        .empty {
+            text-align: center;
+            padding: 2em;
+            background: #1f2937;
+            border-radius: 10px;
+            margin-top: 1.5em;
+        }
+        .table-wrapper {
+            width: 100%;
+            overflow: hidden;
+            border-radius: 10px;
+            box-shadow: 0 10px 25px rgba(15, 23, 42, 0.3);
+        }
+        .table-wrapper table {
+            margin: 0;
+        }
+        @media (max-width: 768px) {
+            .actions {
+                flex-direction: column;
+            }
+            .container {
+                padding-left: 1rem;
+                padding-right: 1rem;
+            }
+            table {
+                table-layout: auto;
+            }
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>Task Dashboard</h1>
-        <p>Live view of every task stored in <code>tasks.db</code>. This page refreshes automatically every 5 seconds or when you click the button.</p>
-        <button id="manual-refresh">Refresh Now</button>
+        <p>Live view of every task stored in <code>tasks.db</code>. This page refreshes automatically every 60 seconds or when you click refresh.</p>
+        <div class="actions">
+            <button id="manual-refresh">Refresh Now</button>
+            <button id="download-csv" class="secondary">Export CSV</button>
+        </div>
         <div id="refresh-status">Waiting for first fetch…</div>
         <div id="table-container" class="empty">No tasks yet. Submit an idea from the main dashboard.</div>
     </div>
@@ -37,6 +145,7 @@
         const tableContainer = document.getElementById('table-container');
         const refreshStatus = document.getElementById('refresh-status');
         const manualRefreshBtn = document.getElementById('manual-refresh');
+        const exportTasksBtn = document.getElementById('download-csv');
 
         async function fetchTasks() {
             refreshStatus.textContent = 'Refreshing…';
@@ -71,22 +180,24 @@
             `).join('');
 
             tableContainer.innerHTML = `
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Task ID</th>
-                            <th>Product Idea</th>
-                            <th>Status</th>
-                            <th>Research Summary</th>
-                            <th>PRD Summary</th>
-                            <th>User Stories</th>
-                            <th>Pending Approval Content</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${rows}
-                    </tbody>
-                </table>
+                <div class="table-wrapper">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Task ID</th>
+                                <th>Product Idea</th>
+                                <th>Status</th>
+                                <th>Research Summary</th>
+                                <th>PRD Summary</th>
+                                <th>User Stories</th>
+                                <th>Pending Approval Content</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${rows}
+                        </tbody>
+                    </table>
+                </div>
             `;
         }
 
@@ -103,7 +214,15 @@
 
         manualRefreshBtn.addEventListener('click', fetchTasks);
         fetchTasks();
-        setInterval(fetchTasks, 5000);
+        setInterval(fetchTasks, 60000);
+        exportTasksBtn.addEventListener('click', () => {
+            const link = document.createElement('a');
+            link.href = `${API_BASE_URL}/tasks/export`;
+            link.download = 'tasks_export.csv';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        });
     </script>
 </body>
 </html>

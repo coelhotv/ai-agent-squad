@@ -1,5 +1,7 @@
 import os
 import json
+import csv
+from io import StringIO
 # --- Core Imports ---
 import uuid
 import logging
@@ -7,7 +9,7 @@ from contextlib import AsyncExitStack
 
 # --- FastAPI Imports ---
 from fastapi import FastAPI, HTTPException, Depends
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 # --- Pydantic Imports ---
@@ -666,6 +668,42 @@ def get_pending_approval(db: Session = Depends(get_db)):
 def list_tasks(db: Session = Depends(get_db)):
     tasks = db.query(Task).order_by(Task.task_id.desc()).all()
     return [TaskStatus.from_orm(task) for task in tasks]
+
+
+@app.get("/tasks/export")
+def export_tasks(db: Session = Depends(get_db)):
+    tasks = db.query(Task).order_by(Task.task_id.desc()).all()
+    buffer = StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(
+        [
+            "Task ID",
+            "Product Idea",
+            "Status",
+            "Research Summary",
+            "PRD Summary",
+            "User Stories",
+            "Pending Approval Content",
+        ]
+    )
+    for task in tasks:
+        writer.writerow(
+            [
+                task.task_id,
+                task.product_idea,
+                task.status,
+                task.research_summary or "",
+                task.prd_summary or "",
+                task.user_stories or "",
+                task.pending_approval_content or "",
+            ]
+        )
+    buffer.seek(0)
+    return StreamingResponse(
+        buffer,
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=tasks_export.csv"},
+    )
 
 @app.post("/respond_to_approval", response_model=TaskStatus)
 async def respond_to_approval(request: RespondToApprovalRequest, db: Session = Depends(get_db)):
