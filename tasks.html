@@ -63,6 +63,7 @@
                     <td>${task.task_id}</td>
                     <td>${escapeHtml(task.product_idea || '')}</td>
                     <td class="status ${task.status}">${task.status}</td>
+                    <td>${escapeHtml(task.research_summary || '')}</td>
                     <td>${escapeHtml(task.pending_approval_content || '')}</td>
                 </tr>
             `).join('');
@@ -74,6 +75,7 @@
                             <th>Task ID</th>
                             <th>Product Idea</th>
                             <th>Status</th>
+                            <th>Research Summary</th>
                             <th>Pending Approval Content</th>
                         </tr>
                     </thead>

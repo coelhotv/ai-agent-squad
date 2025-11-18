@@ -12,3 +12,6 @@ sqlalchemy
 # For SQLite support in LangGraph
 langgraph-checkpoint-sqlite
 aiosqlite
+
+# Research tools
+duckduckgo-search

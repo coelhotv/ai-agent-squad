@@ -43,7 +43,8 @@ This is the most critical part of our setup. We are balancing performance with i
 
 - **Persistence (`tasks.db`):** A **SQLite database** (`tasks.db`) stores the high-level status of each task (e.g., `starting`, `pending_approval`, `completed`). This is used by the web UI to track overall progress.
 
-- **Graph Persistence (`checkpoints.sqlite`):** LangGraph's built-in **`SqliteSaver`** is used as a **checkpointer**. It automatically saves the detailed, internal state of the running agent graph into a separate `checkpoints.sqlite` file. This allows the graph to be reliably paused and resumed without losing its context.
+- **Graph Persistence (`checkpoints.sqlite`):** LangGraph's **`AsyncSqliteSaver`** (with `aiosqlite`) runs as the checkpointer. It records the detailed graph state in `checkpoints.sqlite` so the workflow can pause/resume without losing context, even while the backend remains fully async.
+- **Monitoring UI:** A `/tasks_dashboard` page shows every row in `tasks.db`, updating automatically so humans can audit the workflow at any time.
 
 - **Logging:** The application uses Python's standard `logging` module to provide structured, timestamped output. This is crucial for debugging the asynchronous and multi-step workflows.
 
@@ -101,23 +102,26 @@ This is the most critical part of our setup. We are balancing performance with i
 1.  Built the simplest LangGraph app (`app.py`) with an `intake` and `approved` node.
 2.  Created the FastAPI backend with `/start_task`, `/get_pending_approval`, and `/respond_to_approval` endpoints.
 3.  Created a basic `index.html` UI for task intake and HITL approval.
-4.  **Architectural Refactor:** Replaced the fragile, manual state management with LangGraph's built-in **`SqliteSaver` checkpointer**.
+4.  **Architectural Refactor:** Replaced the fragile, manual state management with LangGraph's built-in **`AsyncSqliteSaver` checkpointer** to match the FastAPI async runtime.
+7.  Added a dedicated `/tasks_dashboard` that renders a live view of `tasks.db`, removing the need to inspect the DB via CLI.
 5.  **Separation of Concerns:** The system now uses two databases:
     *   `tasks.db`: For the web application's high-level task status.
     *   `checkpoints.sqlite`: For the LangGraph agent's detailed execution state.
 6.  This new architecture dramatically simplifies the code and makes the pause/resume cycle much more reliable.
 
-**Phase 3: The First Specialist - "Research" Agent - (NEXT)**
+**Phase 3: The First Specialist - "Research" Agent - (COMPLETED)**
 
 - **Goal:** Add the "Research" agent and give it a tool.
 
 - **Actions:**
 
-1. Add `duckduckgo-search` library.
+1. Added the `duckduckgo-search` library and helper to summarize the top SERP results.
 
-2. Add a "Research" node to the LangGraph.
+2. Inserted a `research` node into the LangGraph flow ahead of the intake step, storing summaries in both checkpoint state and `tasks.db`.
 
-3. Update the UI to display research findings.
+3. Updated the web UI and `/tasks_dashboard` to display the research findings during HITL approval.
+
+4. Noted a future enhancement to optionally swap DuckDuckGo for a Perplexity-powered research API once ready.
 
 **Phase 4: The Design Sprint - "Product" & "UX" Agents**
 

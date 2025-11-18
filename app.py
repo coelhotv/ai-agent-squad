@@ -19,10 +19,13 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from typing import TypedDict, Optional, List
 
 # --- Database Imports ---
-from sqlalchemy import create_engine, Column, String, Text
+from sqlalchemy import create_engine, Column, String, Text, text
+from sqlalchemy import inspect
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.ext.declarative import declarative_base
 
+# --- Research Imports ---
+from duckduckgo_search import DDGS
 # --- Logging Setup ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -41,8 +44,18 @@ class Task(Base):
     product_idea = Column(Text, nullable=False)
     status = Column(String, nullable=False)
     pending_approval_content = Column(Text, nullable=True)
+    research_summary = Column(Text, nullable=True)
 
 Base.metadata.create_all(bind=engine)
+
+def ensure_research_column():
+    inspector = inspect(engine)
+    columns = [col["name"] for col in inspector.get_columns("tasks")]
+    if "research_summary" not in columns:
+        with engine.connect() as conn:
+            conn.execute(text("ALTER TABLE tasks ADD COLUMN research_summary TEXT"))
+
+ensure_research_column()
 
 def get_db():
     db = SessionLocal()
@@ -57,19 +70,55 @@ class AgentState(TypedDict):
     product_idea: str
     status: str
     pending_approval_content: Optional[str]
+    research_summary: Optional[str]
 
 # Keep the async connection open for the lifetime of the app and close on shutdown.
 _checkpointer_stack = AsyncExitStack()
 memory_saver: Optional[AsyncSqliteSaver] = None
 app_graph = None
 
+def run_research_query(product_idea: str) -> str:
+    """Run a lightweight DuckDuckGo search and summarize the top findings."""
+    try:
+        with DDGS() as ddgs:
+            results = list(ddgs.text(product_idea, max_results=3))
+    except Exception as exc:
+        logger.exception("Research query failed for idea '%s'", product_idea)
+        return f"Research unavailable due to error: {exc}"
+
+    if not results:
+        return "No public findings were returned for this idea."
+
+    summary_lines = []
+    for idx, result in enumerate(results, start=1):
+        title = (result.get("title") or "Untitled Result").strip()
+        snippet = (result.get("body") or result.get("snippet") or "").strip()
+        url = result.get("href") or result.get("url") or result.get("link") or ""
+        line = f"{idx}. {title}"
+        if snippet:
+            line += f" — {snippet}"
+        if url:
+            line += f" ({url})"
+        summary_lines.append(line)
+
+    return "\n".join(summary_lines)
+
 # --- Agent Node Functions ---
 # These nodes now only focus on modifying the state dictionary.
 # The main application logic will handle database updates.
+def research_node(state: AgentState):
+    logger.info(f"--- Node: research_node (Task ID: {state['task_id']}) ---")
+    state['research_summary'] = run_research_query(state['product_idea'])
+    state['status'] = "research_completed"
+    return state
+
 def intake_node(state: AgentState):
     logger.info(f"--- Node: intake_node (Task ID: {state['task_id']}) ---")
     state['status'] = "pending_approval"
-    state['pending_approval_content'] = f"Please approve the product idea: '{state['product_idea']}'"
+    summary = state.get('research_summary') or "Research summary unavailable."
+    state['pending_approval_content'] = (
+        f"Research findings for '{state['product_idea']}':\n\n{summary}\n\nApprove to proceed?"
+    )
     return state
 
 def approved_node(state: AgentState):
@@ -79,9 +128,11 @@ def approved_node(state: AgentState):
 
 # --- Graph Definition ---
 workflow = StateGraph(AgentState)
+workflow.add_node("research", research_node)
 workflow.add_node("intake", intake_node)
 workflow.add_node("approved", approved_node)
-workflow.set_entry_point("intake")
+workflow.set_entry_point("research")
+workflow.add_edge("research", "intake")
 workflow.add_edge("intake", "approved")
 workflow.add_edge("approved", END)
 
@@ -134,6 +185,7 @@ class TaskStatus(BaseModel):
     status: str
     product_idea: str
     pending_approval_content: Optional[str] = None
+    research_summary: Optional[str] = None
     class Config:
         from_attributes = True
 
@@ -164,7 +216,8 @@ async def start_task(request: StartTaskRequest, db: Session = Depends(get_db)):
         task_id=task_id,
         product_idea=request.product_idea,
         status="starting",
-        pending_approval_content=None
+        pending_approval_content=None,
+        research_summary=None,
     )
     config = {"configurable": {"thread_id": task_id}}
 
@@ -180,6 +233,7 @@ async def start_task(request: StartTaskRequest, db: Session = Depends(get_db)):
     # 5. Update our application DB with the new status from the graph
     db_task.status = interrupted_state.values['status']
     db_task.pending_approval_content = interrupted_state.values['pending_approval_content']
+    db_task.research_summary = interrupted_state.values.get('research_summary')
     db.commit()
     db.refresh(db_task)
     logger.info(f"Task {task_id} updated in DB to status '{db_task.status}'.")
@@ -224,6 +278,7 @@ async def respond_to_approval(request: RespondToApprovalRequest, db: Session = D
     # 3. Update our application DB with the final status
     db_task.status = final_state.get('status', 'completed')
     db_task.pending_approval_content = None
+    db_task.research_summary = final_state.get('research_summary', db_task.research_summary)
     db.commit()
     logger.info(f"Task {request.task_id} updated in DB to final status '{db_task.status}'.")
     

@@ -93,7 +93,7 @@ aiosqlite
 
 
 
-**Note:** We initially used `langgraph[sqlite]`, but this was found to cause dependency resolution issues. The correct combination is `langgraph-checkpoint-sqlite` plus `aiosqlite`.
+**Note:** We initially used `langgraph[sqlite]`, but this was found to cause dependency resolution issues. The correct combination is `langgraph-checkpoint-sqlite` plus `aiosqlite`. The Research agent also depends on the `duckduckgo-search` package, which is already listed in `requirements.txt`.
 
 
 
@@ -169,27 +169,31 @@ The application now uses a much simpler and more robust workflow that relies on 
 
 
 
-3.  **Intake Node & Pause:** The graph executes the `intake` node. It then hits the predefined `interrupt_before=["approved"]` condition and pauses. The async checkpointer automatically saves the complete state of the graph to the `checkpoints.sqlite` file.
+3.  **Research Phase:** The Research agent queries DuckDuckGo for the product idea, summarizes the top findings, and stores that summary in the graph state.
 
 
 
-4.  **Update for UI:** After the graph pauses, the `/start_task` endpoint updates the task's row in `tasks.db` to `pending_approval` and returns.
+4.  **Intake Node & Pause:** The graph executes the `intake` node. It then hits the predefined `interrupt_before=["approved"]` condition and pauses. The async checkpointer automatically saves the complete state of the graph to the `checkpoints.sqlite` file.
 
 
 
-5.  **UI Asks for Approval:** The web UI, which polls the backend, finds the pending task and displays the "Approve" / "Reject" buttons.
+5.  **Update for UI:** After the graph pauses, the `/start_task` endpoint updates the task's row in `tasks.db` to `pending_approval`, persists the research summary, and returns.
 
 
 
-6.  **Human Decision:** You click **"Approve"**. Your decision is sent to the `/respond_to_approval` endpoint.
+6.  **UI Asks for Approval:** The web UI, which polls the backend, finds the pending task, shows the research findings, and displays the "Approve" / "Reject" buttons.
 
 
 
-7.  **Workflow Resumes:** The backend invokes the graph again, passing the same `task_id` as the `thread_id`. `AsyncSqliteSaver` automatically finds the saved state for that thread and resumes the graph exactly where it left off.
+7.  **Human Decision:** You click **"Approve"**. Your decision is sent to the `/respond_to_approval` endpoint.
 
 
 
-8.  **Workflow Completes:** The `approved` node runs, and the graph finishes. The endpoint then updates the task's status in `tasks.db` to `completed`, and the workflow ends for good.
+8.  **Workflow Resumes:** The backend invokes the graph again, passing the same `task_id` as the `thread_id`. `AsyncSqliteSaver` automatically finds the saved state for that thread and resumes the graph exactly where it left off.
+
+
+
+9.  **Workflow Completes:** The `approved` node runs, and the graph finishes. The endpoint then updates the task's status in `tasks.db` to `completed`, and the workflow ends for good.
 
 
 
@@ -217,9 +221,10 @@ The application now uses a much simpler and more robust workflow that relies on 
 
 
 
-*   **Phase 3: The First Specialist - (NEXT)**
+*   **Phase 3: The First Specialist - (COMPLETED)**
 
-    *   Adding the "Research" agent with a web search tool.
+    *   Added the Research agent that calls DuckDuckGo, summarizes findings, and stores them in both LangGraph state and `tasks.db`.
+    *   Updated the HITL UI to display research summaries before approval and surfaced the same data on the `/tasks_dashboard`.
 
 
 
