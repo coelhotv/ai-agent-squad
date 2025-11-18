@@ -28,7 +28,7 @@ This project uses a hybrid architecture to get the best of both worlds: performa
 
 *   **💾 Application Persistence (`tasks.db`):** A **SQLite database** stores the high-level state of each task (e.g., `starting`, `pending_approval`, `completed`). This database is used by the web UI to track progress.
 
-*   **⚙️ Graph Persistence (`checkpoints.sqlite`):** LangGraph's built-in **`SqliteSaver`** is used as a **checkpointer**. It automatically saves the detailed internal state of the running agent graph into a separate `checkpoints.sqlite` file. This allows the graph to be paused and resumed reliably.
+*   **⚙️ Graph Persistence (`checkpoints.sqlite`):** LangGraph's **`AsyncSqliteSaver`** (with `aiosqlite`) is used as the checkpointer. It keeps the graph's internal state in a `checkpoints.sqlite` file so the workflow can pause and resume asynchronously without losing context.
 
 *   **📜 Logging:** The application uses Python's standard `logging` module to provide structured, informative output for easier debugging.
 
@@ -68,7 +68,7 @@ ollama pull deepseek-r1:8b-llama-distill-q4_K_M
 
 
 
-Ensure the `requirements.txt` file includes the package for SQLite support. This is required for LangGraph's checkpointer.
+Ensure the `requirements.txt` file includes the packages for SQLite checkpointing. These are required for LangGraph's async checkpointer.
 
 
 
@@ -81,6 +81,7 @@ Ensure the `requirements.txt` file includes the package for SQLite support. This
 
 
 langgraph-checkpoint-sqlite
+aiosqlite
 
 
 
@@ -92,7 +93,7 @@ langgraph-checkpoint-sqlite
 
 
 
-**Note:** We initially used `langgraph[sqlite]`, but this was found to cause dependency resolution issues. The correct and stable package is `langgraph-checkpoint-sqlite`.
+**Note:** We initially used `langgraph[sqlite]`, but this was found to cause dependency resolution issues. The correct combination is `langgraph-checkpoint-sqlite` plus `aiosqlite`.
 
 
 
@@ -118,9 +119,13 @@ docker-compose up -d --build
 
 The server will be running and accessible at `http://localhost:8000`.
 
+### Step 5: Monitor Tasks
+
+Visit `http://localhost:8000/tasks_dashboard` to view every row currently stored in `tasks.db`. The dashboard auto-refreshes so you can keep an eye on task status without using the terminal.
 
 
-### Step 5: (Optional) Set Up IDE Support
+
+### Step 6: (Optional) Set Up IDE Support
 
 For better IDE support (e.g., in VS Code), you can create a local virtual environment and install the dependencies there. This allows Pylance to find the libraries.
 
@@ -164,7 +169,7 @@ The application now uses a much simpler and more robust workflow that relies on 
 
 
 
-3.  **Intake Node & Pause:** The graph executes the `intake` node. It then hits the predefined `interrupt_before=["approved"]` condition and pauses. The `SqliteSaver` checkpointer automatically saves the complete state of the graph to the `checkpoints.sqlite` file.
+3.  **Intake Node & Pause:** The graph executes the `intake` node. It then hits the predefined `interrupt_before=["approved"]` condition and pauses. The async checkpointer automatically saves the complete state of the graph to the `checkpoints.sqlite` file.
 
 
 
@@ -180,7 +185,7 @@ The application now uses a much simpler and more robust workflow that relies on 
 
 
 
-7.  **Workflow Resumes:** The backend invokes the graph again, passing the same `task_id` as the `thread_id`. The `SqliteSaver` checkpointer automatically finds the saved state for that thread and resumes the graph exactly where it left off.
+7.  **Workflow Resumes:** The backend invokes the graph again, passing the same `task_id` as the `thread_id`. `AsyncSqliteSaver` automatically finds the saved state for that thread and resumes the graph exactly where it left off.
 
 
 
@@ -206,7 +211,7 @@ The application now uses a much simpler and more robust workflow that relies on 
 
     *   Created the FastAPI backend and a basic `index.html` UI.
 
-    *   **Refactored the core workflow to use a persistent `SqliteSaver` checkpointer, dramatically simplifying the logic and improving reliability.**
+    *   **Refactored the core workflow to use a persistent `AsyncSqliteSaver` checkpointer, dramatically simplifying the logic and improving reliability.**
 
     *   Separated application state (`tasks.db`) from graph execution state (`checkpoints.sqlite`).
 

@@ -11,3 +11,4 @@ sqlalchemy
 
 # For SQLite support in LangGraph
 langgraph-checkpoint-sqlite
+aiosqlite

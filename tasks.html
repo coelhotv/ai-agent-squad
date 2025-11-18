@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Task Dashboard</title>
+    <style>
+        body { font-family: sans-serif; margin: 2em; background-color: #111827; color: #f9fafb; }
+        .container { max-width: 1000px; margin: auto; }
+        table { width: 100%; border-collapse: collapse; margin-top: 1.5em; }
+        th, td { padding: 0.75em; text-align: left; border-bottom: 1px solid #374151; }
+        th { background-color: #1f2937; }
+        tr:nth-child(even) { background-color: #1f2937; }
+        .status { font-weight: bold; }
+        .status.starting { color: #60a5fa; }
+        .status.pending_approval { color: #fbbf24; }
+        .status.completed { color: #34d399; }
+        .status.rejected { color: #f87171; }
+        .status.error { color: #f87171; }
+        #refresh-status { margin-top: 1em; font-size: 0.9em; color: #9ca3af; }
+        button { margin-top: 1em; padding: 0.6em 1em; border: none; border-radius: 4px; background-color: #2563eb; color: white; cursor: pointer; }
+        button:hover { background-color: #1d4ed8; }
+        .empty { text-align: center; padding: 2em; background: #1f2937; border-radius: 8px; margin-top: 1.5em; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Task Dashboard</h1>
+        <p>Live view of every task stored in <code>tasks.db</code>. This page refreshes automatically every 5 seconds or when you click the button.</p>
+        <button id="manual-refresh">Refresh Now</button>
+        <div id="refresh-status">Waiting for first fetch…</div>
+        <div id="table-container" class="empty">No tasks yet. Submit an idea from the main dashboard.</div>
+    </div>
+
+    <script>
+        const API_BASE_URL = window.location.origin;
+        const tableContainer = document.getElementById('table-container');
+        const refreshStatus = document.getElementById('refresh-status');
+        const manualRefreshBtn = document.getElementById('manual-refresh');
+
+        async function fetchTasks() {
+            refreshStatus.textContent = 'Refreshing…';
+            try {
+                const response = await fetch(`${API_BASE_URL}/tasks`);
+                if (!response.ok) throw new Error('Failed to fetch tasks.');
+                const tasks = await response.json();
+                renderTasks(tasks);
+                refreshStatus.textContent = `Last updated ${new Date().toLocaleTimeString()}`;
+            } catch (error) {
+                refreshStatus.textContent = error.message;
+                console.error(error);
+            }
+        }
+
+        function renderTasks(tasks) {
+            if (!tasks.length) {
+                tableContainer.innerHTML = '<div class="empty">No tasks yet. Submit an idea from the main dashboard.</div>';
+                return;
+            }
+
+            const rows = tasks.map(task => `
+                <tr>
+                    <td>${task.task_id}</td>
+                    <td>${escapeHtml(task.product_idea || '')}</td>
+                    <td class="status ${task.status}">${task.status}</td>
+                    <td>${escapeHtml(task.pending_approval_content || '')}</td>
+                </tr>
+            `).join('');
+
+            tableContainer.innerHTML = `
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Task ID</th>
+                            <th>Product Idea</th>
+                            <th>Status</th>
+                            <th>Pending Approval Content</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${rows}
+                    </tbody>
+                </table>
+            `;
+        }
+
+        function escapeHtml(text) {
+            const map = {
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&#039;',
+            };
+            return text.replace(/[&<>"']/g, m => map[m]);
+        }
+
+        manualRefreshBtn.addEventListener('click', fetchTasks);
+        fetchTasks();
+        setInterval(fetchTasks, 5000);
+    </script>
+</body>
+</html>

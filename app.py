@@ -1,9 +1,7 @@
 # --- Core Imports ---
 import uuid
-import asyncio
 import logging
-import atexit
-from contextlib import ExitStack
+from contextlib import AsyncExitStack
 
 # --- FastAPI Imports ---
 from fastapi import FastAPI, HTTPException, Depends
@@ -15,10 +13,10 @@ from pydantic import BaseModel
 
 # --- LangGraph Imports ---
 from langgraph.graph import StateGraph, END
-from langgraph.checkpoint.sqlite import SqliteSaver
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 # --- Typing Imports ---
-from typing import TypedDict, Optional
+from typing import TypedDict, Optional, List
 
 # --- Database Imports ---
 from sqlalchemy import create_engine, Column, String, Text
@@ -60,14 +58,10 @@ class AgentState(TypedDict):
     status: str
     pending_approval_content: Optional[str]
 
-# The checkpointer is responsible for saving and loading the state of the graph.
-# `SqliteSaver.from_conn_string` returns a context manager, so keep it open
-# for the lifetime of the app and cleanly close on shutdown.
-_checkpointer_stack = ExitStack()
-memory_saver = _checkpointer_stack.enter_context(
-    SqliteSaver.from_conn_string("sqlite:////data/checkpoints.sqlite")
-)
-atexit.register(_checkpointer_stack.close)
+# Keep the async connection open for the lifetime of the app and close on shutdown.
+_checkpointer_stack = AsyncExitStack()
+memory_saver: Optional[AsyncSqliteSaver] = None
+app_graph = None
 
 # --- Agent Node Functions ---
 # These nodes now only focus on modifying the state dictionary.
@@ -91,11 +85,23 @@ workflow.set_entry_point("intake")
 workflow.add_edge("intake", "approved")
 workflow.add_edge("approved", END)
 
-# Compile the graph with the checkpointer and interruption
-app_graph = workflow.compile(
-    checkpointer=memory_saver,
-    interrupt_before=["approved"]
-)
+
+async def initialize_graph():
+    """Initialize the LangGraph checkpointer and compiled workflow."""
+    global memory_saver, app_graph
+    memory_saver = await _checkpointer_stack.enter_async_context(
+        AsyncSqliteSaver.from_conn_string("/data/checkpoints.sqlite")
+    )
+    app_graph = workflow.compile(
+        checkpointer=memory_saver,
+        interrupt_before=["approved"]
+    )
+
+
+def get_app_graph():
+    if app_graph is None:
+        raise HTTPException(status_code=503, detail="Agent graph not initialized.")
+    return app_graph
 
 # --- FastAPI Application ---
 app = FastAPI(title="Multi-Agent Product Squad API", version="1.0.0")
@@ -106,6 +112,18 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.on_event("startup")
+async def on_startup():
+    await initialize_graph()
+    logger.info("LangGraph initialized with AsyncSqliteSaver.")
+
+
+@app.on_event("shutdown")
+async def on_shutdown():
+    await _checkpointer_stack.aclose()
+    logger.info("LangGraph resources closed.")
 
 # --- Pydantic Models for API ---
 class StartTaskRequest(BaseModel):
@@ -127,6 +145,7 @@ class RespondToApprovalRequest(BaseModel):
 @app.post("/start_task", response_model=TaskStatus)
 async def start_task(request: StartTaskRequest, db: Session = Depends(get_db)):
     logger.info(f"Received request to start task for idea: '{request.product_idea[:50]}...'")
+    graph = get_app_graph()
     task_id = str(uuid.uuid4())
     
     # 1. Create the task in our application DB
@@ -151,11 +170,11 @@ async def start_task(request: StartTaskRequest, db: Session = Depends(get_db)):
 
     # 3. Asynchronously invoke the graph. It will run until it hits the interruption.
     # The checkpointer automatically saves its state.
-    await app_graph.ainvoke(initial_state, config)
+    await graph.ainvoke(initial_state, config)
     logger.info(f"Graph for task {task_id} executed until interruption.")
 
     # 4. Get the state of the graph at the interruption point
-    interrupted_state = app_graph.get_state(config)
+    interrupted_state = await graph.aget_state(config)
     logger.info(f"Current graph state for task {task_id}: {interrupted_state.values}")
 
     # 5. Update our application DB with the new status from the graph
@@ -174,6 +193,11 @@ def get_pending_approval(db: Session = Depends(get_db)):
         return TaskStatus.from_orm(pending_task)
     return None
 
+@app.get("/tasks", response_model=List[TaskStatus])
+def list_tasks(db: Session = Depends(get_db)):
+    tasks = db.query(Task).order_by(Task.task_id.desc()).all()
+    return [TaskStatus.from_orm(task) for task in tasks]
+
 @app.post("/respond_to_approval", response_model=TaskStatus)
 async def respond_to_approval(request: RespondToApprovalRequest, db: Session = Depends(get_db)):
     db_task = db.query(Task).filter(Task.task_id == request.task_id).first()
@@ -190,10 +214,11 @@ async def respond_to_approval(request: RespondToApprovalRequest, db: Session = D
     
     # 1. Define the config to resume the correct graph instance
     config = {"configurable": {"thread_id": request.task_id}}
+    graph = get_app_graph()
     
     # 2. Invoke the graph again. The checkpointer loads the state automatically.
     # We pass `None` as the state because the checkpointer is handling it.
-    final_state = await app_graph.ainvoke(None, config)
+    final_state = await graph.ainvoke(None, config)
     logger.info(f"Graph for task {request.task_id} finished execution.")
 
     # 3. Update our application DB with the final status
@@ -212,3 +237,7 @@ async def read_index():
 @app.get("/status")
 def read_root():
     return {"message": "Welcome to the Multi-Agent Product Squad API!"}
+
+@app.get("/tasks_dashboard", include_in_schema=False)
+async def read_tasks_dashboard():
+    return FileResponse("tasks.html")
