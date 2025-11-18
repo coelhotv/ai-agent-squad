@@ -32,7 +32,8 @@ import httpx
 # --- Logging Setup ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
-logging.getLogger('sqlalchemy.engine').setLevel(logging.INFO)
+# Reduce SQL logging noise (especially from dashboard polling)
+logging.getLogger('sqlalchemy.engine').setLevel(logging.WARNING)
 
 # --- Application Database (SQLite) ---
 # This DB stores the high-level status of tasks for the UI
