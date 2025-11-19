@@ -41,6 +41,6 @@ Key FastAPI endpoints:
 
 ## Static Assets
 
-- `index.html` (task intake) and `tasks.html` (live dashboard) are served directly via FastAPI. UI assets live right in the project root, which keeps deployment light and portable.
+- `index.html` (task intake) and `tasks.html` (live dashboard) are served directly via FastAPI. The intake page renders the workflow timeline, live status pill, artifact collapsibles, and UX preview buttons that open new tabs for Mermaid/Tailwind outputs. UI assets live right in the project root, which keeps deployment light and portable.
 
 See `DOCS/setup.md` for environment configuration and `DOCS/workflow.md` for how these pieces operate end-to-end.

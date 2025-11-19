@@ -13,6 +13,7 @@ To build a coordinated, multi-agent "product squad" that can validate and ship e
 - **Agent Framework:** **LangGraph** (Python), to build the squad as a controllable, graph-based state machine.
 
 - **Interface:** A **FastAPI** backend serving a **simple web UI** (HTML/JS/CSS) for project intake and Human-in-the-Loop (HITL) approvals.
+- **UI Experience:** The intake page now mirrors the workflow: status pill, timeline chips that light up per agent, real-time response messaging, and per-artifact controls (research/PRD/stories collapsibles plus UX preview buttons that open the Mermaid flow and Tailwind wireframe in full-browser tabs).
 
 - **IDE:** **VS Code** (with some **AI** extension for support).
 
@@ -105,7 +106,7 @@ This is the most critical part of our setup. We are balancing performance with i
 2.  Created the FastAPI backend with `/start_task`, `/get_pending_approval`, and `/respond_to_approval` endpoints.
 3.  Created a basic `index.html` UI for task intake and HITL approval.
 4.  **Architectural Refactor:** Replaced the fragile, manual state management with LangGraph's built-in **`AsyncSqliteSaver` checkpointer** to match the FastAPI async runtime.
-7.  Added a dedicated `/tasks_dashboard` that renders a live view of `tasks.db`, removing the need to inspect the DB via CLI.
+7.  Added a dedicated `/tasks_dashboard` that renders a live view of `tasks.db`, removing the need to inspect the DB via CLI, and refreshed the intake UI with a card layout, workflow status row, and artifact previews so operators can work from a single screen.
 5.  **Separation of Concerns:** The system now uses two databases:
     *   `tasks.db`: For the web application's high-level task status.
     *   `checkpoints.sqlite`: For the LangGraph agent's detailed execution state.
@@ -125,19 +126,21 @@ This is the most critical part of our setup. We are balancing performance with i
 
 4. Documented environment configuration for `PERPLEXITY_API_KEY` so the integration can run inside Docker.
 
-**Phase 4: The Design Sprint - "Product" & "UX" Agents - (IN PROGRESS)**
+**Phase 4: The Design Sprint - "Product" & "UX" Agents - (COMPLETED)**
 
 - **Goal:** Add the "Product" and "UX/Designer" agents.
 
 - **Actions:**
 
-1. Implemented the Product agent that drafts a concise PRD (exec summary, market opportunity, needs, scope, success) and pauses for HITL approval.
+1. Product agent drafts a concise PRD (exec summary, market opportunity, needs, scope, success) and pauses for HITL approval for each milestone.
 
-2. After approval, the Product agent generates initial user stories + acceptance criteria, pauses for another approval, and then hands off to the upcoming UX agent.
+2. After approval, the Product agent generates user stories + acceptance criteria and pauses again for HITL sign-off.
 
-3. Next: design prompts/output pipeline for generating Mermaid user flows and HTML/Tailwind wireframes.
+3. UX agent now generates Mermaid user flows and feeds the same context into the Tailwind wireframe generator so both artifacts stay in sync.
 
-**Phase 5: The Build Sprint - "Engineering" & "QA" Agents**
+4. The dashboard and intake UI were updated with buttons that open flow/wireframe previews in a new tab; `/tasks_dashboard` and CSV exports now include the `user_flow_diagram` and `wireframe_html` columns, keeping UX artifacts visible everywhere.
+
+**Phase 5: The Build Sprint - "Engineering" & "QA" Agents - (NEXT)**
 
 - **Goal:** Add the "Engineering" and "QA" agents to write and review code.
 

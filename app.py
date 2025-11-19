@@ -587,7 +587,8 @@ def generate_wireframe_html(product_idea: str, user_stories: str | None, flow_di
     }    
     system_prompt = (
         "You are a Senior UI/UX Prototyper. Your goal is to create Low-Fidelity Wireframes using HTML and Tailwind CSS"
-        " to illustrate the main UX of the following product idea, estabilished user stories, acceptance criteria, and user flow."
+        " to illustrate the core UX of the following product idea. Use the produced user stories and their acceptance criteria,"
+        " along with the provided user flow as your main inputs for this wireframe."
     )
     user_prompt = f"""
         Idea: {product_idea}.
@@ -599,10 +600,9 @@ def generate_wireframe_html(product_idea: str, user_stories: str | None, flow_di
         {flow_diagram or 'Unavailable.'}
 
         ### DESIGN RULES:
-        1. **Aesthetic:** Use a 'grayscale' wireframe style.
-        - Use `bg-gray-100` through `bg-gray-900` for structure.
+        1. **Aesthetic:** Stick to low-fidelity design. 
+        - Use 'grayscale' style when possible.
         - Use borders (`border`, `border-gray-300`) to define areas.
-        - Do NOT use vibrant colors (blue, red, green). Stick to monochrome.
 
         2. **Images:** Do NOT use <img> tags requiring external URLs.
         - Instead, use placeholder divs: `<div class="w-full h-48 bg-gray-300 flex items-center justify-center">Image Placeholder</div>`
