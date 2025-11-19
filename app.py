@@ -157,6 +157,7 @@ def query_perplexity(product_idea: str) -> Optional[str]:
             "type": "object",
             "properties": {
                 "summary": {"type": "string"},
+                "target_audience": {"type": "string", "description": "A brief description of the ideal customer profile."},
                 "opportunities": {
                     "type": "array",
                     "items": {
@@ -191,7 +192,7 @@ def query_perplexity(product_idea: str) -> Optional[str]:
                     },
                 },
             },
-            "required": ["summary", "opportunities", "risks"],
+            "required": ["summary", "target_audience", "opportunities", "risks"],
         },
     }
     system_prompt = (
@@ -200,8 +201,8 @@ def query_perplexity(product_idea: str) -> Optional[str]:
     )
     user_prompt = (
         f"Idea: {product_idea}. Provide insights for PM/UX planning."
-        " Keep it concise and structured. Max 2-3 paragraphs for summary,"
-        " 2-3 bullets each for opportunities and risks."
+        " Identify a primary target audience. Keep it concise and structured."
+        " Max 2-3 paragraphs for summary, 2-3 bullets each for opportunities and risks."
         " Use credible sources and list main URLs used as references (3-5 max)."
     )
 
@@ -302,6 +303,10 @@ def format_structured_summary(data: dict) -> str:
     if summary:
         lines.append("Summary:\n" + summary.strip())
 
+    target_audience = data.get("target_audience")
+    if target_audience:
+        lines.append("\nTarget Audience:\n" + target_audience.strip())
+
     opportunities = data.get("opportunities") or []
     if opportunities:
         lines.append("\nOpportunities:")
@@ -342,9 +347,13 @@ def generate_prd_document(product_idea: str, research_summary: str | None) -> st
                 "type": "array",
                 "items": {"type": "string"}
             },
-            "product_scope": {
-                "type": "array",
-                "items": {"type": "string"}
+            "scope": {
+                "type": "object",
+                "properties": {
+                    "in_scope": {"type": "array", "items": {"type": "string"}},
+                    "out_of_scope": {"type": "array", "items": {"type": "string"}},
+                },
+                "required": ["in_scope", "out_of_scope"],
             },
             "success_criteria": {
                 "type": "array",
@@ -355,12 +364,13 @@ def generate_prd_document(product_idea: str, research_summary: str | None) -> st
             "executive_summary",
             "market_opportunity",
             "customer_needs",
-            "product_scope",
+            "scope",
             "success_criteria",
         ]
     }    
     system_prompt = (
-        "You are a senior PM drafting a one-page PRD. Keep it punchy and actionable."
+        "You are a senior PM translating user needs and business opportunities into a clear, "
+        "concise, and actionable one-page PRD for engineering and design teams. Keep it punchy."
     )
     user_prompt = (
         f"Idea: {product_idea}.\nResearch summary: {research_summary or 'n/a'}."
@@ -376,7 +386,14 @@ def generate_prd_document(product_idea: str, research_summary: str | None) -> st
                     "executive_summary": {"type": "string"},
                     "market_opportunity": {"type": "array", "items": {"type": "string"}},
                     "customer_needs": {"type": "array", "items": {"type": "string"}},
-                    "product_scope": {"type": "array", "items": {"type": "string"}},
+                    "product_scope": {
+                        "type": "object",
+                        "properties": {
+                            "in_scope": {"type": "array", "items": {"type": "string"}},
+                            "out_of_scope": {"type": "array", "items": {"type": "string"}},
+                        },
+                        "required": ["in_scope", "out_of_scope"],
+                    },
                     "success_criteria": {"type": "array", "items": {"type": "string"}},
                 },
                 "required": [
@@ -399,9 +416,15 @@ def generate_prd_document(product_idea: str, research_summary: str | None) -> st
     lines.append("\nCustomer Needs:")
     for item in parsed.get("customer_needs", [])[:4]:
         lines.append(f"- {item}")
-    lines.append("\nProduct Scope & Use Cases:")
-    for item in parsed.get("product_scope", [])[:4]:
-        lines.append(f"- {item}")
+    scope = parsed.get("product_scope", {})
+    if scope.get("in_scope"):
+        lines.append("\nIn Scope:")
+        for item in scope["in_scope"][:4]:
+            lines.append(f"- {item}")
+    if scope.get("out_of_scope"):
+        lines.append("\nOut of Scope:")
+        for item in scope["out_of_scope"][:3]:
+            lines.append(f"- {item}")
     lines.append("\nSuccess Criteria:")
     for item in parsed.get("success_criteria", [])[:3]:
         lines.append(f"- {item}")
@@ -415,8 +438,9 @@ def fallback_prd(product_idea: str, research_summary: str | None) -> str:
         f"- Based on research: {research_summary or 'insights pending.'}\n"
         "- Target early adopters and gather feedback.\n\nCustomer Needs:\n"
         "- Simple onboarding\n- Clear value communication\n- Feedback loop\n\n"
-        "Product Scope & Use Cases:\n- Pilot use case that validates demand\n"
-        "- Internal admin dashboard for basic tracking\n\nSuccess Criteria:\n"
+        "In Scope:\n- Pilot use case that validates demand\n"
+        "- Internal admin dashboard for basic tracking\n\nOut of Scope:\n"
+        "- Multi-user collaboration\n- Advanced analytics\n\nSuccess Criteria:\n"
         "- 10 pilot sign-ups\n- 60% repeat usage in 2 weeks\n- Qualitative feedback on usability"
     )
 
@@ -445,6 +469,7 @@ def generate_user_stories(product_idea: str, prd_summary: str | None) -> str:
     }
     system_prompt = (
         "You are a senior PM writing crisp user stories with acceptance criteria."
+        ' Follow the format "As a [user type], I want [goal] so that [benefit]."'
         " Keep scope tight for v0 and stay within the provided PRD."
     )
     user_prompt = (
@@ -530,11 +555,11 @@ def generate_user_flow_diagram(product_idea: str, user_stories: str | None) -> s
         },
         "required": ["title", "nodes_list", "mermaid_syntax"]
     }    
-    system_prompt = """
-        You are an expert UX Product Architect designed to visualize user flows using Mermaid syntax.
-        Your goal is to map out a clear, logical process flow based on the following product idea and estabilished user stories.
-        You MUST output your response as a JSON object adhering strictly to the provided schema.
-        """
+    system_prompt = (
+        "You are an expert UX Architect. Your goal is to create a clear, logical Mermaid user flow diagram "
+        "based on the provided product idea and user stories. "
+        "You MUST output a JSON object that adheres strictly to the provided schema."
+    )
     user_prompt = f"""
         Idea: {product_idea}.
         User stories:
@@ -586,9 +611,9 @@ def generate_wireframe_html(product_idea: str, user_stories: str | None, flow_di
         "required": ["html_content"]
     }    
     system_prompt = (
-        "You are a Senior UI/UX Prototyper. Your goal is to create Low-Fidelity Wireframes using HTML and Tailwind CSS"
-        " to illustrate the core UX of the following product idea. Use the produced user stories and their acceptance criteria,"
-        " along with the provided user flow as your main inputs for this wireframe."
+        "You are a Senior UI/UX Prototyper. Your goal is to create a low-fidelity wireframe using HTML and Tailwind CSS. "
+        "Use the user stories, acceptance criteria, and user flow as inputs. "
+        "Think in terms of reusable components like headers, cards, and sections."
     )
     user_prompt = f"""
         Idea: {product_idea}.
