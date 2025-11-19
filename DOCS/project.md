@@ -89,7 +89,7 @@ This is the most critical part of our setup. We are balancing performance with i
 
 5. **Decision:** Moved Ollama to a native macOS app for GPU performance.
 
-6. Updated `app.py` to use `ChatOllama` and connect to `http://host.docker.internal:11434`.
+6. Updated `app.py` to call `http://host.docker.internal:11434/api/generate` directly with schema-backed prompts so every agent gets structured JSON from the local Ollama model.
 
 7. **Decision:** Set up a local `.venv` to solve Pylance warnings.
 

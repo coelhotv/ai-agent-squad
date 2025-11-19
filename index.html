@@ -380,7 +380,7 @@
                 </details>
                 <div class="ux-card">
                     <h3>UX Artifacts</h3>
-                    <p>Preview Mermaid flows and Tailwind wireframes inside a modal viewer.</p>
+                    <p>Preview Mermaid flows and Tailwind wireframes inside a new browser tab.</p>
                     <div class="ux-actions">
                         <button type="button" id="view-flow-btn" disabled>View Flow Diagram</button>
                         <button type="button" id="view-wireframe-btn" class="secondary" disabled>View Wireframe</button>
@@ -389,14 +389,6 @@
             </div>
         </section>
 
-    </div>
-
-    <div id="artifact-modal" class="modal-overlay hidden">
-        <div class="modal-content">
-            <button id="close-modal" class="modal-close" aria-label="Close">&times;</button>
-            <h3 id="modal-title" class="modal-heading"></h3>
-            <div id="modal-body" class="modal-body">No content yet.</div>
-        </div>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
@@ -421,10 +413,6 @@
         const refreshQueueBtn = document.getElementById('force-refresh-btn');
         const viewFlowBtn = document.getElementById('view-flow-btn');
         const viewWireframeBtn = document.getElementById('view-wireframe-btn');
-        const modalOverlay = document.getElementById('artifact-modal');
-        const modalTitle = document.getElementById('modal-title');
-        const modalBody = document.getElementById('modal-body');
-        const closeModalBtn = document.getElementById('close-modal');
 
         let currentTaskId = null;
         let pollingIntervalId = null;
@@ -582,59 +570,68 @@
             viewWireframeBtn.disabled = !storedWireframeHtml;
         }
 
-        function openModal(type) {
-            modalOverlay.classList.remove('hidden');
-            if (type === 'flow') {
-                modalTitle.textContent = 'User Flow Diagram';
-                if (storedFlowDiagram && window.mermaid) {
-                    modalBody.textContent = 'Rendering diagram...';
-                    const renderId = `mermaid-${Date.now()}`;
-                    try {
-                        window.mermaid.render(renderId, storedFlowDiagram, (svgCode) => {
-                            modalBody.innerHTML = svgCode;
-                        });
-                    } catch (error) {
-                        console.error('Mermaid render error:', error);
-                        modalBody.innerHTML = `<p>Unable to render diagram.</p><pre>${storedFlowDiagram.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</pre>`;
-                    }
-                } else if (storedFlowDiagram) {
-                    modalBody.innerHTML = `<pre>${storedFlowDiagram.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</pre>`;
-                } else {
-                    modalBody.textContent = 'No diagram available yet.';
-                }
-            } else if (type === 'wireframe') {
-                modalTitle.textContent = 'Wireframe (Tailwind HTML)';
-                if (storedWireframeHtml) {
-                    const iframe = document.createElement('iframe');
-                    iframe.style.width = '100%';
-                    iframe.style.height = '70vh';
-                    iframe.style.border = 'none';
-                    iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin');
-                    const template = `
+        function openFlowInNewTab() {
+            if (!storedFlowDiagram) {
+                alert('No diagram available yet.');
+                return;
+            }
+            const safeScriptFlow = storedFlowDiagram
+                .replace(/\\/g, '\\\\')
+                .replace(/`/g, '\\`');
+            const safeHtmlFlow = storedFlowDiagram
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;');
+            const template = `
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <scr` + `ipt src="https://cdn.tailwindcss.com"></scr` + `ipt>
-  <style>body{margin:0;background:#0f172a;font-family:Inter,system-ui,sans-serif;}</style>
+  <title>User Flow Diagram</title>
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({ startOnLoad: true, securityLevel: 'strict', theme: 'neutral' });
+    window.addEventListener('DOMContentLoaded', () => {
+      const target = document.querySelector('#diagram');
+      target.textContent = \`${safeScriptFlow}\`;
+    });
+  <\/script>
+  <style>
+    body { margin: 0; font-family: system-ui, sans-serif; background: #f8fafc; padding: 2rem; }
+    #diagram { font-size: 1rem; }
+  </style>
+</head>
+<body>
+  <div id="diagram" class="mermaid">${safeHtmlFlow}</div>
+</body>
+</html>`;
+            const newWindow = window.open('', '_blank');
+            if (newWindow) {
+                newWindow.document.write(template);
+            }
+        }
+
+        function openWireframeInNewTab() {
+            if (!storedWireframeHtml) {
+                alert('No wireframe available yet.');
+                return;
+            }
+            const template = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Wireframe Preview</title>
+  <script src="https://cdn.tailwindcss.com"><\/script>
+  <style>body{margin:0;background:#0f172a;font-family:Inter,system-ui,sans-serif;padding:2rem;}</style>
 </head>
 <body>
 ${storedWireframeHtml}
 </body>
 </html>`;
-                    iframe.srcdoc = template;
-                    modalBody.innerHTML = '';
-                    modalBody.appendChild(iframe);
-                } else {
-                    modalBody.textContent = 'No wireframe available yet.';
-                }
+            const newWindow = window.open('', '_blank');
+            if (newWindow) {
+                newWindow.document.write(template);
             }
-        }
-
-        function closeModal() {
-            modalOverlay.classList.add('hidden');
-            modalBody.innerHTML = 'No content yet.';
-            modalTitle.textContent = '';
         }
 
         function startPolling() {
@@ -685,14 +682,8 @@ ${storedWireframeHtml}
         approveBtn.addEventListener('click', () => respondToApproval(true));
         rejectBtn.addEventListener('click', () => respondToApproval(false));
         refreshQueueBtn.addEventListener('click', pollForApprovals);
-        viewFlowBtn.addEventListener('click', () => openModal('flow'));
-        viewWireframeBtn.addEventListener('click', () => openModal('wireframe'));
-        closeModalBtn.addEventListener('click', closeModal);
-        modalOverlay.addEventListener('click', (event) => {
-            if (event.target === modalOverlay) {
-                closeModal();
-            }
-        });
+        viewFlowBtn.addEventListener('click', openFlowInNewTab);
+        viewWireframeBtn.addEventListener('click', openWireframeInNewTab);
 
         renderWorkflow(currentStatus);
         updateCurrentStage(currentStatus);

@@ -30,6 +30,7 @@ Key FastAPI endpoints:
 - **Perplexity:** When `PERPLEXITY_API_KEY` is set, the Research node calls Perplexity’s `sonar-pro` model to get structured JSON output (summary, opportunities, risks, references). Formatting helpers live in `app.py`.
 - **DuckDuckGo Fallback:** Absent a key or if Perplexity fails, the Research node uses `ddgs` through `DDGS.text`/`DDGS.news` to build a fallback summary.
 - **Product Agent:** Uses Ollama to write PRDs and user stories. Approved research becomes input for the next node.
+- **Structured Ollama Calls:** `call_ollama_json` posts to the Ollama `/api/generate` endpoint with a JSON schema per agent (PRD, stories, flows, wireframes). The model is forced to return valid structured JSON, which we unwrap into text artifacts before persisting. UX artifacts share context: the wireframe generator receives the Mermaid flow plus user stories to keep both deliverables consistent.
 - **Future Agents:** UX, Engineering, QA, and GTM nodes will continue the serialized path (each pausing for human approvals), keeping the same checkpoint + DB record pattern so everything remains auditable.
 
 ## Monitoring & Logging

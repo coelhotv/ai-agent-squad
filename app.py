@@ -191,7 +191,7 @@ def query_perplexity(product_idea: str) -> Optional[str]:
                     },
                 },
             },
-            "required": ["summary", "opportunities", "risks", "references"],
+            "required": ["summary", "opportunities", "risks"],
         },
     }
     system_prompt = (
@@ -202,7 +202,7 @@ def query_perplexity(product_idea: str) -> Optional[str]:
         f"Idea: {product_idea}. Provide insights for PM/UX planning."
         " Keep it concise and structured. Max 2-3 paragraphs for summary,"
         " 2-3 bullets each for opportunities and risks."
-        " Use credible sources and cite URLs in references."
+        " Use credible sources and list main URLs used as references (3-5 max)."
     )
 
     parsed = call_perplexity_json(system_prompt, user_prompt, json_schema)
@@ -252,34 +252,30 @@ def call_perplexity_json(
 
 
 def call_ollama_json(
-    system_prompt: str, user_prompt: str, schema_description: str
+    system_prompt: str, user_prompt: str, json_schema: object
 ) -> Optional[dict]:
     if not OLLAMA_MODEL:
         return None
 
     payload = {
         "model": OLLAMA_MODEL,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {
-                "role": "user",
-                "content": f"{user_prompt}\nReturn ONLY valid JSON matching: {schema_description}",
-            },
-        ],
+        "system": system_prompt,
+        "prompt": user_prompt,
+        "format": json_schema,
         "stream": False,
         "think": True,
     }
 
     try:
         with httpx.Client(timeout=180) as client:
-            response = client.post(f"{OLLAMA_BASE_URL}api/chat", json=payload)
+            response = client.post(f"{OLLAMA_BASE_URL}api/generate", json=payload)
             response.raise_for_status()
             data = response.json()
     except Exception as exc:
         logger.exception("Ollama request failed: %s", exc)
         return None
 
-    content = data.get("message", {}).get("content")
+    content = data.get("response")
     if not content:
         return None
 
@@ -334,11 +330,35 @@ def format_structured_summary(data: dict) -> str:
 
 
 def generate_prd_document(product_idea: str, research_summary: str | None) -> str:
-    schema_description = (
-        "{\"executive_summary\": string, \"market_opportunity\": [string],"
-        " \"customer_needs\": [string], \"product_scope\": [string],"
-        " \"success_criteria\": [string]}"
-    )
+    prd_schema = {
+        "type": "object",
+        "properties": {
+            "executive_summary": {"type": "string"},
+            "market_opportunity": {
+                "type": "array",
+                "items": {"type": "string"}
+            },
+            "customer_needs": {
+                "type": "array",
+                "items": {"type": "string"}
+            },
+            "product_scope": {
+                "type": "array",
+                "items": {"type": "string"}
+            },
+            "success_criteria": {
+                "type": "array",
+                "items": {"type": "string"}
+            }
+        },
+        "required": [
+            "executive_summary",
+            "market_opportunity",
+            "customer_needs",
+            "product_scope",
+            "success_criteria",
+        ]
+    }    
     system_prompt = (
         "You are a senior PM drafting a one-page PRD. Keep it punchy and actionable."
     )
@@ -346,7 +366,7 @@ def generate_prd_document(product_idea: str, research_summary: str | None) -> st
         f"Idea: {product_idea}.\nResearch summary: {research_summary or 'n/a'}."
         " Draft the requested sections with the most important bullets first."
     )
-    parsed = call_ollama_json(system_prompt, user_prompt, schema_description)
+    parsed = call_ollama_json(system_prompt, user_prompt, prd_schema)
     if not parsed and PERPLEXITY_API_KEY:
         json_schema = {
             "name": "prd_outline",
@@ -402,10 +422,27 @@ def fallback_prd(product_idea: str, research_summary: str | None) -> str:
 
 
 def generate_user_stories(product_idea: str, prd_summary: str | None) -> str:
-    schema_description = (
-        "{\"stories\":[{\"title\":string,\"story\":string,"
-        "\"acceptance_criteria\":[string]}],\"backlog\":[string]}"
-    )
+    stories_schema = {
+        "type": "object",
+        "properties": {
+            "stories": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "story": {"type": "string"},
+                        "acceptance_criteria": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                        },
+                    },
+                    "required": ["story", "acceptance_criteria"],
+                },
+            },
+            "backlog": {"type": "array", "items": {"type": "string"}},
+        },
+        "required": ["stories", "backlog"],
+    }
     system_prompt = (
         "You are a senior PM writing crisp user stories with acceptance criteria."
         " Keep scope tight for v0 and stay within the provided PRD."
@@ -414,7 +451,7 @@ def generate_user_stories(product_idea: str, prd_summary: str | None) -> str:
         f"Idea: {product_idea}.\nPRD context: {prd_summary or 'Unavailable.'}\n"
         " Produce 3-4 user stories plus a short backlog list."
     )
-    parsed = call_ollama_json(system_prompt, user_prompt, schema_description)
+    parsed = call_ollama_json(system_prompt, user_prompt, stories_schema)
     if not parsed and PERPLEXITY_API_KEY:
         json_schema = {
             "name": "product_user_stories",
@@ -426,14 +463,13 @@ def generate_user_stories(product_idea: str, prd_summary: str | None) -> str:
                         "items": {
                             "type": "object",
                             "properties": {
-                                "title": {"type": "string"},
                                 "story": {"type": "string"},
                                 "acceptance_criteria": {
                                     "type": "array",
                                     "items": {"type": "string"},
                                 },
                             },
-                            "required": ["title", "story", "acceptance_criteria"],
+                            "required": ["story", "acceptance_criteria"],
                         },
                     },
                     "backlog": {"type": "array", "items": {"type": "string"}},
@@ -447,9 +483,8 @@ def generate_user_stories(product_idea: str, prd_summary: str | None) -> str:
 
     lines = ["User Stories:"]
     for entry in parsed.get("stories", [])[:4]:
-        title = entry.get("title") or "Story"
         story_text = entry.get("story") or ""
-        lines.append(f"\n{title}\n{story_text}")
+        lines.append(f"\n{story_text}")
         for criteria in entry.get("acceptance_criteria", [])[:3]:
             lines.append(f"  - AC: {criteria}")
 
@@ -474,18 +509,55 @@ def fallback_user_stories(product_idea: str) -> str:
 
 
 def generate_user_flow_diagram(product_idea: str, user_stories: str | None) -> str:
-    schema_description = "{\"mermaid\":string,\"notes\":string}"
-    system_prompt = (
-        "You are a senior UX designer, producing a concise Mermaid user flow with nodes and decision points."
-        " Focus on the main user stories and acceptance criteria to outline the key journey."
-    )
-    user_prompt = (
-        f"Idea: {product_idea}.\nUser stories:\n{user_stories or 'Unavailable.'}\n"
-        " Return Mermaid flowchart text with 4-6 nodes max. A single code block only."
-    )
-    parsed = call_ollama_json(system_prompt, user_prompt, schema_description)
-    if parsed and parsed.get("mermaid"):
-        return parsed["mermaid"]
+    mermaid_schema = {
+        "type": "object",
+        "properties": {
+            "title": {"type": "string"},
+            "nodes_list": {
+                "type": "array",
+                "minItems": 4,
+                "maxItems": 6,
+                "items": {
+                    "type": "string",
+                    "description": "Unique ID or label for the node"
+                },
+                "description": "List exactly 4 to 6 distinct steps/nodes for the diagram."
+            },
+            "mermaid_syntax": {
+                "type": "string",
+                "description": "The Mermaid code. It must ONLY use the nodes defined in 'nodes_list'."
+            }
+        },
+        "required": ["title", "nodes_list", "mermaid_syntax"]
+    }    
+    system_prompt = """
+        You are an expert UX Product Architect designed to visualize user flows using Mermaid syntax.
+        Your goal is to map out a clear, logical process flow based on the following product idea and estabilished user stories.
+        You MUST output your response as a JSON object adhering strictly to the provided schema.
+        """
+    user_prompt = f"""
+        Idea: {product_idea}.
+        User stories:
+        {user_stories or 'Unavailable.'}
+        ### GUIDELINES:
+         1. **Node Count:**
+         - Plan exactly 4 to 6 steps. No more, no less.
+         - Use the 'nodes_list' field in the JSON to plan these steps first.
+         2. **Node Types:**
+         - Use standard rectangular nodes `[ ]` for User Actions (e.g., `A[User clicks Login]`).
+         - Use diamond nodes `{{ }}` for System Decisions or logic checks (e.g., `B{{ Is Valid? }}`).
+         - Ensure the flow has a clear Start and End.
+         3. **Mermaid Syntax Rules:**
+         - Use simple, alphanumeric IDs for nodes (e.g., `Step1`, `Step2`). Do NOT use spaces in IDs.
+         - Put the descriptive text inside the brackets/parentheses.
+         - Example: `Start[User Opens App] --> Check{{ Logged In? }}`.
+         - Orientation: Defaults to `graph TD` (Top-Down).
+         4. **Content Quality:**
+         - Keep labels concise (2-5 words).
+    """
+    parsed = call_ollama_json(system_prompt, user_prompt, mermaid_schema)
+    if parsed and parsed.get("mermaid_syntax"):
+        return parsed["mermaid_syntax"]
     return fallback_user_flow_diagram(product_idea)
 
 
@@ -502,20 +574,47 @@ def fallback_user_flow_diagram(product_idea: str) -> str:
     )
 
 
-def generate_wireframe_html(product_idea: str, user_stories: str | None) -> str:
-    schema_description = "{\"layout\":string}"
+def generate_wireframe_html(product_idea: str, user_stories: str | None, flow_diagram: str | None) -> str:
+    wireframe_schema = {
+        "type": "object",
+        "properties": {
+            "html_content": {
+                "type": "string",
+                "description": "The raw HTML elements. Do NOT include <html>, <head>, or <body> tags. Just the div structures."
+            }
+        },
+        "required": ["html_content"]
+    }    
     system_prompt = (
-        "You are a technical product designer delivering low-fidelity HTML + Tailwind CSS markup."
-        " Use semantic sections, headings, and placeholder CTAs to produce a clean wireframe layout for the following idea."
-        " Focus on key journeys and actions from the user stories."
+        "You are a Senior UI/UX Prototyper. Your goal is to create Low-Fidelity Wireframes using HTML and Tailwind CSS"
+        " to illustrate the main UX of the following product idea, estabilished user stories, acceptance criteria, and user flow."
     )
-    user_prompt = (
-        f"Idea: {product_idea}.\nUser stories:\n{user_stories or 'Unavailable.'}\n"
-        " Output only HTML markup, max ~60 lines, ready for a Tailwind sandbox, no comments."
-    )
-    parsed = call_ollama_json(system_prompt, user_prompt, schema_description)
-    if parsed and parsed.get("layout"):
-        return parsed["layout"]
+    user_prompt = f"""
+        Idea: {product_idea}.
+        
+        User stories:
+        {user_stories or 'Unavailable.'}
+
+        User flow (Mermaid):
+        {flow_diagram or 'Unavailable.'}
+
+        ### DESIGN RULES:
+        1. **Aesthetic:** Use a 'grayscale' wireframe style.
+        - Use `bg-gray-100` through `bg-gray-900` for structure.
+        - Use borders (`border`, `border-gray-300`) to define areas.
+        - Do NOT use vibrant colors (blue, red, green). Stick to monochrome.
+
+        2. **Images:** Do NOT use <img> tags requiring external URLs.
+        - Instead, use placeholder divs: `<div class="w-full h-48 bg-gray-300 flex items-center justify-center">Image Placeholder</div>`
+
+        3. **Typography:** Use standard sans-serif. Use `font-bold` for headers.
+
+        4. **Output:** - Provide ONLY the HTML structure (divs, sections, columns) aligned with the user flow.
+        - Do not write the <!DOCTYPE> or <body> tags; just the content inside.
+    """
+    parsed = call_ollama_json(system_prompt, user_prompt, wireframe_schema)
+    if parsed and parsed.get("html_content"):
+        return parsed["html_content"]
     return fallback_wireframe_html(product_idea)
 
 
@@ -573,7 +672,7 @@ def run_duckduckgo_research(product_idea: str) -> str:
                         region="us-en",
                         safesearch="off",
                         timelimit="y",
-                        backend="html",
+                        backend="duckduckgo",
                     )
                 )
             elif source == "news":
@@ -646,7 +745,7 @@ def ux_design_node(state: AgentState):
         state['product_idea'], state.get('user_stories')
     )
     state['wireframe_html'] = generate_wireframe_html(
-        state['product_idea'], state.get('user_stories')
+        state['product_idea'], state.get('user_stories'), state.get('user_flow_diagram')
     )
     state['status'] = "pending_ux_approval"
     state['pending_approval_content'] = (
@@ -694,7 +793,7 @@ def get_app_graph():
     return app_graph
 
 # --- FastAPI Application ---
-app = FastAPI(title="Multi-Agent Product Squad API", version="1.3.0")
+app = FastAPI(title="Multi-Agent Product Squad API", version="1.5.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
