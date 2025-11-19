@@ -5,6 +5,7 @@ from io import StringIO
 # --- Core Imports ---
 import uuid
 import logging
+import time
 from contextlib import AsyncExitStack
 
 # --- FastAPI Imports ---
@@ -234,6 +235,7 @@ def call_perplexity_json(
         "Accept": "application/json",
     }
 
+    start_time = time.time()
     with httpx.Client(timeout=120) as client:
         response = client.post(PERPLEXITY_API_URL, headers=headers, json=payload)
         if response.status_code >= 400:
@@ -244,6 +246,16 @@ def call_perplexity_json(
             )
         response.raise_for_status()
         data = response.json()
+
+    duration = time.time() - start_time
+    usage = data.get("usage", {})
+    input_tokens = usage.get("prompt_tokens", 0)
+    output_tokens = usage.get("completion_tokens", 0)
+
+    logger.info(
+        f"Perplexity call took {duration:.2f}s. "
+        f"Tokens: Input={input_tokens}, Output={output_tokens}"
+    )
 
     content = data.get("choices", [{}])[0].get("message", {}).get("content")
     if not content:
@@ -268,10 +280,20 @@ def call_ollama_json(
     }
 
     try:
+        start_time = time.time()
         with httpx.Client(timeout=180) as client:
             response = client.post(f"{OLLAMA_BASE_URL}api/generate", json=payload)
             response.raise_for_status()
             data = response.json()
+        duration = time.time() - start_time
+
+        input_tokens = data.get("prompt_eval_count", 0)
+        output_tokens = data.get("eval_count", 0)
+
+        logger.info(
+            f"Ollama call took {duration:.2f}s. "
+            f"Tokens: Input={input_tokens}, Output={output_tokens}"
+        )
     except Exception as exc:
         logger.exception("Ollama request failed: %s", exc)
         return None
@@ -857,9 +879,54 @@ class TaskStatus(BaseModel):
     class Config:
         from_attributes = True
 
+class ArtifactUpdate(BaseModel):
+    research_summary: Optional[str] = None
+    prd_summary: Optional[str] = None
+    user_stories: Optional[str] = None
+    user_flow_diagram: Optional[str] = None
+    wireframe_html: Optional[str] = None
+
+
 class RespondToApprovalRequest(BaseModel):
     task_id: str
     approved: bool
+    overrides: Optional[ArtifactUpdate] = None
+
+
+PENDING_STATUSES = {
+    "pending_research_approval",
+    "pending_prd_approval",
+    "pending_story_approval",
+    "pending_ux_approval",
+    "pending_approval",
+}
+
+
+def apply_artifact_overrides(task_id: str, overrides: ArtifactUpdate, db: Session):
+    db_task = db.query(Task).filter(Task.task_id == task_id).first()
+    if not db_task:
+        raise HTTPException(status_code=404, detail="Task not found.")
+    if db_task.status not in PENDING_STATUSES:
+        raise HTTPException(
+            status_code=400,
+            detail="Artifacts can only be edited while the task is pending approval.",
+        )
+    updated = False
+    for field in (
+        "research_summary",
+        "prd_summary",
+        "user_stories",
+        "user_flow_diagram",
+        "wireframe_html",
+    ):
+        value = getattr(overrides, field)
+        if value is not None:
+            setattr(db_task, field, value)
+            updated = True
+    if updated:
+        db.commit()
+        db.refresh(db_task)
+    return db_task
 
 # --- API Endpoints (Refactored) ---
 @app.post("/start_task", response_model=TaskStatus)
@@ -941,6 +1008,12 @@ def list_tasks(db: Session = Depends(get_db)):
     return [TaskStatus.from_orm(task) for task in tasks]
 
 
+@app.post("/update_artifacts", response_model=TaskStatus)
+def update_artifacts(request: ArtifactUpdate, db: Session = Depends(get_db)):
+    db_task = apply_artifact_overrides(request.task_id, request, db)
+    return TaskStatus.from_orm(db_task)
+
+
 @app.get("/tasks/export")
 def export_tasks(db: Session = Depends(get_db)):
     tasks = db.query(Task).order_by(Task.task_id.desc()).all()
@@ -993,6 +1066,9 @@ async def respond_to_approval(request: RespondToApprovalRequest, db: Session = D
     if not db_task or db_task.status not in pending_statuses:
         raise HTTPException(status_code=404, detail="Task not found or not pending approval.")
 
+    if request.overrides:
+        apply_artifact_overrides(request.task_id, request.overrides, db)
+
     if not request.approved:
         db_task.status = 'rejected'
         db_task.pending_approval_content = None
@@ -1008,7 +1084,14 @@ async def respond_to_approval(request: RespondToApprovalRequest, db: Session = D
     
     # 2. Invoke the graph again. The checkpointer loads the state automatically.
     # We pass `None` as the state because the checkpointer is handling it.
-    final_state = await graph.ainvoke(None, config)
+    state = await graph.aget_state(config)
+    overrides = request.overrides
+    if overrides:
+        for field in ("research_summary", "prd_summary", "user_stories", "user_flow_diagram", "wireframe_html"):
+            value = getattr(overrides, field)
+            if value is not None:
+                state.values[field] = value
+    final_state = await graph.ainvoke(state, config)
     logger.info(f"Graph for task {request.task_id} advanced to state '{final_state.get('status')}'.")
 
     # 3. Update our application DB with the new status/content

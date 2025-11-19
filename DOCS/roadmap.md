@@ -29,9 +29,17 @@ Each phase represents a major milestone in the Multi-Agent Product Squad. Status
 ### Phase 4 – Design Sprint (✅)
 
 - Product agent drafts PRDs and user stories with two HITL approvals.
-- UX/Designer agent generates Mermaid flows + Tailwind wireframes, surfaces them in the UI, and pauses for approval before the task becomes `ready_for_engineering`.
+- UX/Designer agent generates Mermaid flows + Tailwind wireframes via structured `/api/generate` calls, keeps them in sync, and surfaces them with preview buttons that open new tabs.
 - Artifacts are persisted (`user_flow_diagram`, `wireframe_html`) and exposed via `/tasks_dashboard` and CSV export.
-- Main intake UI now highlights workflow stages, status messages, and inline diagram previews so operators can guide the process from one screen.
+- Main intake UI now highlights workflow stages, status messages, and artifact controls so operators can stay on one screen.
+
+### Phase 4.5 – Collaborative Approvals (🟡)
+
+Before moving to Phase 5 we will let humans edit every artifact before approving it so they can improve the research/PRD/stories/UX work instead of only gating it. Planned work:
+1. Add edit controls next to each artifact that are active only while the corresponding `pending_*` status is waiting.
+2. Persist edits to `tasks.db` and pass the new text back into the graph state (or reload it from the DB) so downstream agents consume the human updates.
+3. Allow the preview buttons to render the edited flow/wireframe content, and lock the fields once the task advances past approval/rejection.
+4. Once this collaboration layer is stable, proceed to Phase 5 (Engineering + QA).
 
 ## In Progress
 

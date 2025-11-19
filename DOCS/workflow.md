@@ -45,7 +45,7 @@ Once the stories are approved, the UX agent runs automatically:
 
 1. `ux_design_node` generates a Mermaid user flow (`user_flow_diagram`) with structured JSON returned from Ollama’s `/api/generate`.
 2. The same node immediately feeds that flow, along with the approved stories, into the Tailwind wireframe generator so both artifacts stay synchronized.
-3. Status changes to `pending_ux_approval`, and the UI now offers “View Flow” / “View Wireframe” buttons that open each artifact in a new tab for full-screen previews.
+3. Status changes to `pending_ux_approval`, and the UI now offers “View Flow” / “View Wireframe” buttons that open each artifact in a new tab for full-screen previews; each artifact panel also includes an Edit button active while the task is pending, so humans can revise research, PRDs, stories, or UX artifacts before approving.
 4. On approval, the workflow marks the task `ready_for_engineering`.
 
 All UX outputs are stored in `tasks.db`, listed on `/tasks_dashboard`, and included in `/tasks/export`.

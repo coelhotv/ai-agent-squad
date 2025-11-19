@@ -21,6 +21,7 @@ Key FastAPI endpoints:
 
 - `/start_task` (POST): ingests a product idea, creates a DB record, and starts the LangGraph workflow with a unique `task_id`.
 - `/respond_to_approval` (POST): resumes paused graph once a human approves.
+- `/update_artifacts` (POST): persists human edits to research/PRD/stories/flow/wireframe while the status stays pending, so the updated text is stored for previews and later approval.
 - `/tasks` (GET): returns every task record for the dashboard.
 - `/tasks/export` (GET): streams all records as a downloadable CSV (`tasks_export.csv`) for offline audits.
 - `/tasks_dashboard` and `/index.html`: static UI entry points served via `FileResponse`.
