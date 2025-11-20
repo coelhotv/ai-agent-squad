@@ -526,11 +526,13 @@ def generate_user_stories(product_idea: str, prd_summary: str | None) -> str:
     system_prompt = (
         "You are a senior PM writing crisp user stories with acceptance criteria."
         ' Follow the format "As a [user type], I want [goal] so that [benefit]."'
-        " Keep scope tight for v0 (MVP) and stay within the provided PRD."
+        " Keep scope tight for MVP (v0) and stay within the provided PRD."
     )
     user_prompt = (
         f"Idea: {product_idea}.\nPRD context: {prd_summary or 'Unavailable.'}\n"
-        " Produce 3-4 user stories plus a short backlog list."
+        " Produce 2 user stories to be in the MVP, plus 1-2 user stories for a second release."
+        " Number each story sequentially. For each story, provide 2-3 acceptance criteria."
+        " End with a short backlog list."
     )
     parsed = call_ollama_json(
         system_prompt, user_prompt, stories_schema, reasoning=True
@@ -616,7 +618,7 @@ def generate_user_flow_diagram(product_idea: str, user_stories: str | None) -> s
     system_prompt = (
         "You are an expert UX Architect. Your goal is to create a clear, logical MermaidJS user flow diagram "
         "based on the provided product idea, its estabished **user stories and acceptance criterias**. "
-        "For this MVP release, you can skip the login/registration flow."
+        "For this MVP release, you can skip the login/registration flow and focus on the 2 first stories/ac."
         "You MUST output a JSON object that adheres strictly to the provided schema."
     )
     user_prompt = f"""
@@ -799,7 +801,7 @@ def generate_engineering_spec(
         Your goal is to design a robust backend API structure based on User Stories/AC and Mermaid flow.
 
         CRITICAL DESIGN RULES:
-        1. **Coverage:** You must design schema and endpoints to cover the first (1) User Story/AC + flow rovided.
+        1. **Coverage:** You must design schema and endpoints to cover the initial two (1 & 2) User Stories/AC + flow provided.
         2. **HTTP Semantics:** For any creation or update (POST/PUT), you MUST specify a `request_body_model`. Do NOT design APIs that use Query parameters for inserting data.
         3. **Data Integrity:** Define strict constraints for your models (e.g., positive numbers for counts, required fields).
         4. **Separation:** Create distinct models for Requests (Input) and Responses (Output) if necessary to hide internal IDs or computed fields.
@@ -827,19 +829,21 @@ def generate_engineering_spec(
 def generate_engineering_code_from_spec(
     product_idea: str,
     user_stories: str | None,
+    wireframe_html: str | None,
     spec_text: str | None,
 ) -> tuple[str, str]:
     code_schema = {
         "type": "object",
         "properties": {
-            "filename": { "type": "string" },
+            "file_name": { "type": "string" },
             "code": { "type": "string", "description": "Complete, runnable Python code." }
-    },
-    "required": ["filename", "code"]
+        },
+        "required": ["file_name", "code"]
     }
     system_prompt = """
         You are an Expert Python Developer.
         Your task is to generate a single-file FastAPI application that implements the provided Architecture Plan EXACTLY.
+        User stories and wireframe are provided for context only.
 
         IMPLEMENTATION RULES:
         1. **Strict Adherence:** Implement every model and endpoint defined in the Architecture Plan. Do not skip any.
@@ -851,7 +855,7 @@ def generate_engineering_code_from_spec(
         4. Use JSON bodies for POST/PUT/PATCH. Align path params in decorators and signatures.
         5. **No Hallucinations:** Do not add features not requested in the plan.
         6. Return only JSON as specified in the schema, with file_name + code only (no Markdown).
-        
+
     """
     user_prompt = f"""
     Product idea: {product_idea}
@@ -859,10 +863,13 @@ def generate_engineering_code_from_spec(
     User stories (for context only, spec is authoritative):
     {user_stories or 'Unavailable.'}
 
+    Wireframe (for context only, spec is authoritative):
+    {wireframe_html or 'Unavailable.'}
+
     Architecture Spec (implement exactly these models and endpoints):
     {spec_text or 'Unavailable.'}
 
-    Now write the code!
+    Now write the Python code!
     """
     parsed = call_ollama_json(system_prompt, user_prompt, code_schema)
     if parsed and parsed.get("file_name") and parsed.get("code"):
@@ -1048,6 +1055,7 @@ def engineering_node(state: AgentState):
     file_name, code = generate_engineering_code_from_spec(
         state['product_idea'],
         state.get('user_stories'),
+        state.get('wireframe_html'),
         state.get('engineering_spec'),
     )
     state['engineering_file_name'] = file_name
