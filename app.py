@@ -531,7 +531,7 @@ def generate_user_stories(product_idea: str, prd_summary: str | None) -> str:
     user_prompt = (
         f"Idea: {product_idea}.\nPRD context: {prd_summary or 'Unavailable.'}\n"
         " Produce 2 user stories to be in the MVP, plus 1-2 user stories for a second release."
-        " Number each story sequentially. For each story, provide 2-3 acceptance criteria."
+        " Number sequentially each story. For each story, provide 2-3 acceptance criteria."
         " End with a short backlog list."
     )
     parsed = call_ollama_json(
@@ -618,8 +618,8 @@ def generate_user_flow_diagram(product_idea: str, user_stories: str | None) -> s
     system_prompt = (
         "You are an expert UX Architect. Your goal is to create a clear, logical MermaidJS user flow diagram "
         "based on the provided product idea, its estabished **user stories and acceptance criterias**. "
-        "For this MVP release, you can skip the login/registration flow and focus on the 2 first stories/ac."
-        "You MUST output a JSON object that adheres strictly to the provided schema."
+        "For this MVP release, you must **IGNORE** the login/registration flows and just focus on the 2 first stories/ac."
+        "Output a JSON object that adheres strictly to the provided schema."
     )
     user_prompt = f"""
         Idea: {product_idea}.
