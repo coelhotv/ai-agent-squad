@@ -13,7 +13,7 @@ Ensure your machine meets the following before launching the stack:
 Ollama hosts the LLM locally. Run:
 
 ```bash
-ollama pull deepseek-r1:7b-qwen-distill-q4_K_M
+ollama pull deepseek-r1:14b-qwen-distill-q4_K_M
 ```
 
 You can change the model using `OLLAMA_MODEL` if needed (see Environment Variables below).
@@ -36,7 +36,7 @@ These packages support LangGraph checkpoints, DuckDuckGo fallbacks, and Perplexi
 ## Environment Variables
 
 - `PERPLEXITY_API_KEY` (optional): When set, the Research agent calls Perplexity’s `sonar-pro` model for structured JSON summaries. Without it, DuckDuckGo is used.
-- `OLLAMA_MODEL` (optional): Defaults to `deepseek-r1:7b-qwen-distill-q4_K_M`.
+- `OLLAMA_MODEL` (optional): Defaults to `deepseek-r1:14b-qwen-distill-q4_K_M`.
 - `OLLAMA_BASE_URL` (optional): Defaults to `http://host.docker.internal:11434`. Change only if your host exposes Ollama differently.
 
 Copy `.env.example` to `.env` and update values there. Docker Compose automatically loads `.env`, so you can tweak configs without rebuilding. For ad-hoc overrides, you can still export them in your shell.
