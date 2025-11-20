@@ -45,8 +45,11 @@ This is the most critical part of our setup. We are balancing performance with i
 - **Persistence (`tasks.db`):** A **SQLite database** (`tasks.db`) stores the high-level status of each task (e.g., `starting`, `pending_approval`, `completed`). This is used by the web UI to track overall progress.
 
 - **Graph Persistence (`checkpoints.sqlite`):** LangGraph's **`AsyncSqliteSaver`** (with `aiosqlite`) runs as the checkpointer. It records the detailed graph state in `checkpoints.sqlite` so the workflow can pause/resume without losing context, even while the backend remains fully async.
+
 - **Monitoring UI:** A `/tasks_dashboard` page shows every row in `tasks.db`, updating automatically so humans can audit the workflow at any time.
+
 - **Perplexity Research:** When `PERPLEXITY_API_KEY` is set, the Research agent calls the Perplexity `sonar-pro` model for structured findings (summary, opportunities, risks, references), falling back to DuckDuckGo if the API call fails.
+
 - **Product Agent:** Builds on the research to generate a concise PRD and user stories using the local Ollama model, each requiring HITL approval before handing off to UX.
 
 - **Logging:** The application uses Python's standard `logging` module to provide structured, timestamped output. This is crucial for debugging the asynchronous and multi-step workflows.
