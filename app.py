@@ -96,6 +96,8 @@ _checkpointer_stack = AsyncExitStack()
 PERPLEXITY_API_KEY = settings.perplexity_api_key
 PERPLEXITY_API_URL = str(settings.perplexity_api_url)
 OLLAMA_BASE_URL = str(settings.ollama_base_url)
+OLLAMA_REASONING_MODEL = settings.ollama_reasoning_model
+OLLAMA_CODING_MODEL = settings.ollama_coding_model
 OLLAMA_MODEL = settings.ollama_model
 memory_saver: Optional[AsyncSqliteSaver] = None
 app_graph = None
@@ -107,7 +109,8 @@ def log_environment_status():
     checkpoints_path = settings.checkpoints_path
     logger.info("Checkpoint store: %s", checkpoints_path)
     logger.info("Ollama base URL: %s", OLLAMA_BASE_URL)
-    logger.info("Ollama model: %s", OLLAMA_MODEL)
+    logger.info("Ollama reasoning model: %s", OLLAMA_REASONING_MODEL or OLLAMA_MODEL)
+    logger.info("Ollama coding model: %s", OLLAMA_CODING_MODEL or OLLAMA_MODEL)
 
     if PERPLEXITY_API_KEY:
         masked_key = PERPLEXITY_API_KEY[:6] + "..." if len(PERPLEXITY_API_KEY) > 6 else "***"
@@ -264,20 +267,35 @@ def call_perplexity_json(
     return _extract_json(content)
 
 
+def _get_ollama_model(reasoning: bool) -> Optional[str]:
+    model = OLLAMA_REASONING_MODEL if reasoning else OLLAMA_CODING_MODEL
+    if not model:
+        model = OLLAMA_MODEL
+    return model
+
+
 def call_ollama_json(
-    system_prompt: str, user_prompt: str, json_schema: object
+    system_prompt: str,
+    user_prompt: str,
+    json_schema: object,
+    *,
+    reasoning: bool = False,
 ) -> Optional[dict]:
-    if not OLLAMA_MODEL:
+    model = _get_ollama_model(reasoning)
+    if not model:
+        logger.warning("No Ollama model configured for reasoning=%s.", reasoning)
         return None
 
     payload = {
-        "model": OLLAMA_MODEL,
+        "model": model,
         "system": system_prompt,
         "prompt": user_prompt,
         "format": json_schema,
         "stream": False,
-        "think": True,
+        "think": reasoning,
     }
+
+    logger.info("Calling Ollama model %s (reasoning=%s).", model, reasoning)
 
     try:
         start_time = time.time()
@@ -394,7 +412,9 @@ def generate_prd_document(product_idea: str, research_summary: str | None) -> st
         f"Idea: {product_idea}.\nResearch summary: {research_summary or 'n/a'}."
         " Draft the requested sections with the most important bullets first."
     )
-    parsed = call_ollama_json(system_prompt, user_prompt, prd_schema)
+    parsed = call_ollama_json(
+        system_prompt, user_prompt, prd_schema, reasoning=True
+    )
     if not parsed and PERPLEXITY_API_KEY:
         json_schema = {
             "name": "prd_outline",
@@ -480,7 +500,9 @@ def generate_user_stories(product_idea: str, prd_summary: str | None) -> str:
         f"Idea: {product_idea}.\nPRD context: {prd_summary or 'Unavailable.'}\n"
         " Produce 3-4 user stories plus a short backlog list."
     )
-    parsed = call_ollama_json(system_prompt, user_prompt, stories_schema)
+    parsed = call_ollama_json(
+        system_prompt, user_prompt, stories_schema, reasoning=True
+    )
     if not parsed and PERPLEXITY_API_KEY:
         json_schema = {
             "name": "product_user_stories",
