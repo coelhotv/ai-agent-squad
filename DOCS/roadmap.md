@@ -33,7 +33,7 @@ Each phase represents a major milestone in the Multi-Agent Product Squad. Status
 - Artifacts are persisted (`user_flow_diagram`, `wireframe_html`) and exposed via `/tasks_dashboard` and CSV export.
 - Main intake UI now highlights workflow stages, status messages, and artifact controls so operators can stay on one screen.
 
-### Phase 4.5 – Collaborative Approvals (🟡)
+### Phase 4.5 – Collaborative Approvals (✅)
 
 Before moving to Phase 5 we will let humans edit every artifact before approving it so they can improve the research/PRD/stories/UX work instead of only gating it. Planned work:
 1. Add edit controls next to each artifact that are active only while the corresponding `pending_*` status is waiting.
