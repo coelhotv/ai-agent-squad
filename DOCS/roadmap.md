@@ -8,7 +8,7 @@ Each phase represents a major milestone in the Multi-Agent Product Squad. Status
 
 - Hybrid architecture: Dockerized FastAPI + LangGraph, native Ollama host.
 - `docker-compose.yml`, `Dockerfile`, and `requirements.txt` created.
-- Ollama model switched to `deepseek-r1:14b-qwen-distill-q4_K_M`.
+- Ollama model switched to `deepseek-r1:14b-qwen-distill-q4_K_M`, and we now pair it with `qwen2.5-coder:14b-instruct-q4_K_M` for coding-intensive specialists.
 - SQLite persistence established (`tasks.db`, `checkpoints.sqlite`).
 - Hello-world flow validated (logging, connectivity, vscode/.venv setup).
 

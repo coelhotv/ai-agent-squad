@@ -14,10 +14,14 @@ This repository orchestrates a LangGraph-powered **Coordinator** and a suite of 
 ## Quick Start
 
 1. Install [Ollama](https://ollama.com/) and Docker Desktop.
-2. Run `ollama pull deepseek-r1:14b-qwen-distill-q4_K_M`.
+2. Run both OTP models:
+   - `ollama pull deepseek-r1:14b-qwen-distill-q4_K_M` (reasoning/PM + GTM roles)
+   - `ollama pull qwen2.5-coder:14b-instruct-q4_K_M` (UX, Engineering, QA)
 3. Copy `.env.example` to `.env`, fill in any overrides (e.g., `PERPLEXITY_API_KEY`).
 4. Start the app: `docker-compose up -d --build`.
 5. Point your browser to `http://localhost:8000` for intake and `http://localhost:8000/tasks_dashboard` to watch the dashboard.
+
+Set `OLLAMA_REASONING_MODEL`/`OLLAMA_CODING_MODEL` in `.env` to keep the reasoning (PM/GTM) and coding (UX/Engineering/QA) agents aligned with the right Ollama stacks; `OLLAMA_MODEL` still works as a fallback if the role-specific values are unset.
 
 Refer to `DOCS/setup.md` for environment variables, dependency notes, and optional local development via a Python virtual environment.
 
@@ -34,4 +38,4 @@ See `DOCS/workflow.md` for the full narrative, including how checkpoints resume 
 
 ## Next Steps
 
-Continue expanding the roadmap from `DOCS/roadmap.md`, especially Phase 4+ workstreams (UX, Engineering, QA, GTM). Update `DOCS/operations.md` whenever you add new observability or export features so operations stay current.
+Continue expanding the roadmap from `DOCS/roadmap.md`, especially Phase 4+ workstreams (UX, Engineering, QA, GTM). Update `DOCS/operations.md` whenever you add new observability or export features so operations stay current, and document any future model swaps in DOCS/setup.md.

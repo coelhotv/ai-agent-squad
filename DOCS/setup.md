@@ -8,15 +8,16 @@ Ensure your machine meets the following before launching the stack:
 - **Docker Desktop:** Required for the FastAPI/LangGraph container defined in `docker-compose.yml`.
 - **Python 3.11+:** Needed if you run parts of the project locally outside Docker.
 
-## Pull the Model
+## Pull the Models
 
-Ollama hosts the LLM locally. Run:
+Ollama hosts the LLMs locally. Run:
 
 ```bash
 ollama pull deepseek-r1:14b-qwen-distill-q4_K_M
+ollama pull qwen2.5-coder:14b-instruct-q4_K_M
 ```
 
-You can change the model using `OLLAMA_MODEL` if needed (see Environment Variables below).
+The reasoning tasks (PM + GTM agents) prefer `deepseek-r1:14b-qwen-distill-q4_K_M`; UX, Engineering, and QA prompts rely on `qwen2.5-coder:14b-instruct-q4_K_M`.
 
 ## Install Dependencies (Optional, for local dev)
 
@@ -36,7 +37,9 @@ These packages support LangGraph checkpoints, DuckDuckGo fallbacks, and Perplexi
 ## Environment Variables
 
 - `PERPLEXITY_API_KEY` (optional): When set, the Research agent calls Perplexity’s `sonar-pro` model for structured JSON summaries. Without it, DuckDuckGo is used.
-- `OLLAMA_MODEL` (optional): Defaults to `deepseek-r1:14b-qwen-distill-q4_K_M`.
+- `OLLAMA_REASONING_MODEL` (optional): Defaults to `deepseek-r1:14b-qwen-distill-q4_K_M`.
+- `OLLAMA_CODING_MODEL` (optional): Defaults to `qwen2.5-coder:14b-instruct-q4_K_M`.
+- `OLLAMA_MODEL` (optional): Legacy fallback for whichever model you want to return if the role-specific values are unset.
 - `OLLAMA_BASE_URL` (optional): Defaults to `http://host.docker.internal:11434`. Change only if your host exposes Ollama differently.
 
 Copy `.env.example` to `.env` and update values there. Docker Compose automatically loads `.env`, so you can tweak configs without rebuilding. For ad-hoc overrides, you can still export them in your shell.
