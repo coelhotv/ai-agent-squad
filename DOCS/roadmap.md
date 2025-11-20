@@ -47,18 +47,14 @@ Before moving to Phase 5 we will let humans edit every artifact before approving
 
 ## Future Phases
 
-### Phase 5 – Build Sprint (🟠)
+### Phase 5 – Build Sprint (✅)
 
 Objective: Add Engineering and QA agents.
 
-Planned work:
-- Engineering agent produces a single-file prototype and supporting backend logic.
-- QA agent reviews the generated code and flags regressions or missing tests.
-
-Success Criteria:
-- Code artifacts stored in task record or surfaced via dashboard.
-- QA approvals gate shipping to next phase.
-- Logging captures QA decisions.
+Completed work:
+- Engineering agent generates a single-file FastAPI prototype (filename + code) using the coding model.
+- QA agent reviews the generated code against the PRD/stories and produces an approval-gated findings report.
+- New statuses (`pending_engineering_approval`, `pending_qa_approval`, `ready_for_gtm`) and artifacts are rendered in the UI and exported via `/tasks/export`.
 
 ### Phase 6 – Ship (🟢)
 

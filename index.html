@@ -508,6 +508,23 @@
                         <button class="edit-btn" type="button" data-artifact="wireframe_html">Edit</button>
                     </div>
                 </div>
+                <details id="engineering-results">
+                    <summary>Engineering Prototype</summary>
+                    <div class="artifact-row">
+                        <div style="flex:1; min-width:0;">
+                            <p id="engineering-filename">No prototype yet.</p>
+                            <pre id="engineering-code">No prototype yet.</pre>
+                        </div>
+                        <button class="edit-btn" type="button" data-artifact="engineering_code">Edit</button>
+                    </div>
+                </details>
+                <details id="qa-results">
+                    <summary>QA Review</summary>
+                    <div class="artifact-row">
+                        <pre id="qa-review">No QA review yet.</pre>
+                        <button class="edit-btn" type="button" data-artifact="qa_review">Edit</button>
+                    </div>
+                </details>
             </div>
         </section>
 
@@ -548,6 +565,9 @@
         const refreshQueueBtn = document.getElementById('force-refresh-btn');
         const viewFlowBtn = document.getElementById('view-flow-btn');
         const viewWireframeBtn = document.getElementById('view-wireframe-btn');
+        const engineeringFileName = document.getElementById('engineering-filename');
+        const engineeringCode = document.getElementById('engineering-code');
+        const qaReview = document.getElementById('qa-review');
         const overlay = document.getElementById('artifact-overlay');
         const overlayTitle = document.getElementById('overlay-title');
         const overlayText = document.getElementById('overlay-text');
@@ -566,6 +586,8 @@
             user_stories: document.getElementById('stories-content'),
             user_flow_diagram: document.getElementById('flow-status'),
             wireframe_html: document.getElementById('wireframe-status'),
+            engineering_code: engineeringCode,
+            qa_review: qaReview,
         };
         let storedFlowDiagram = null;
         let storedWireframeHtml = null;
@@ -576,7 +598,9 @@
             { key: 'pending_prd_approval', label: 'PRD', description: 'Product requirements' },
             { key: 'pending_story_approval', label: 'User Stories', description: 'Stories & ACs' },
             { key: 'pending_ux_approval', label: 'UX Design', description: 'Flows & wireframes' },
-            { key: 'ready_for_engineering', label: 'Engineering Handoff', description: 'Build sprint ready' },
+            { key: 'pending_engineering_approval', label: 'Engineering', description: 'Backend prototype' },
+            { key: 'pending_qa_approval', label: 'QA Review', description: 'Quality gate' },
+            { key: 'ready_for_gtm', label: 'GTM Handoff', description: 'Ready for launch docs' },
             { key: 'completed', label: 'Shipped', description: 'Final deliverables' },
             { key: 'rejected', label: 'Rejected', description: 'Manual review' },
         ];
@@ -587,7 +611,9 @@
             'pending_prd_approval',
             'pending_story_approval',
             'pending_ux_approval',
-            'ready_for_engineering',
+            'pending_engineering_approval',
+            'pending_qa_approval',
+            'ready_for_gtm',
             'completed',
             'rejected',
         ];
@@ -598,7 +624,9 @@
             pending_prd_approval: 'Product Agent',
             pending_story_approval: 'Product Agent',
             pending_ux_approval: 'UX Designer',
-            ready_for_engineering: 'Engineering Agent',
+            pending_engineering_approval: 'Engineering Agent',
+            pending_qa_approval: 'QA Agent',
+            ready_for_gtm: 'GTM Agent',
             completed: 'GTM Agent',
             rejected: 'Coordinator (Manual review)',
         };
@@ -646,6 +674,8 @@
             'pending_prd_approval',
             'pending_story_approval',
             'pending_ux_approval',
+            'pending_engineering_approval',
+            'pending_qa_approval',
             'pending_approval',
         ]);
 
@@ -654,6 +684,8 @@
             pending_prd_approval: ['prd_summary'],
             pending_story_approval: ['user_stories'],
             pending_ux_approval: ['user_flow_diagram', 'wireframe_html'],
+            pending_engineering_approval: ['engineering_code'],
+            pending_qa_approval: ['qa_review'],
         };
 
         function updateCurrentStage(status) {
@@ -717,6 +749,8 @@
             renderArtifact(storiesContent, null);
             renderFlowDiagram(null);
             renderWireframe(null);
+            renderEngineeringPrototype(null, null);
+            renderQaReview(null);
         }
 
         function updateArtifactsFromTask(task) {
@@ -725,6 +759,8 @@
             renderArtifact(storiesContent, task?.user_stories);
             renderFlowDiagram(task?.user_flow_diagram);
             renderWireframe(task?.wireframe_html);
+            renderEngineeringPrototype(task?.engineering_file_name, task?.engineering_code);
+            renderQaReview(task?.qa_review);
         }
 
         ideaForm.addEventListener('submit', async (e) => {
@@ -808,6 +844,17 @@
             viewWireframeBtn.disabled = !storedWireframeHtml;
             artifactDisplays.wireframe_html.textContent =
                 storedWireframeHtml ? 'Wireframe ready for review' : 'No wireframe yet.';
+        }
+
+        function renderEngineeringPrototype(fileName, codeText) {
+            const resolvedName = fileName?.trim();
+            const resolvedCode = codeText?.trim();
+            engineeringFileName.textContent = resolvedName ? `File: ${resolvedName}` : 'No prototype yet.';
+            engineeringCode.textContent = resolvedCode || 'No prototype yet.';
+        }
+
+        function renderQaReview(reviewText) {
+            qaReview.textContent = reviewText?.trim() || 'No QA review yet.';
         }
 
         function openOverlay(artifact) {
@@ -966,12 +1013,20 @@ ${storedWireframeHtml}
                     disableArtifactButtonsForStatus(prevStatus);
                 }
                 updateArtifactsFromTask(data);
-                if (["pending_research_approval", "pending_prd_approval", "pending_story_approval", "pending_ux_approval", "pending_approval"].includes(data.status)) {
+                if ([
+                    "pending_research_approval",
+                    "pending_prd_approval",
+                    "pending_story_approval",
+                    "pending_ux_approval",
+                    "pending_engineering_approval",
+                    "pending_qa_approval",
+                    "pending_approval"
+                ].includes(data.status)) {
                     showMessage(`Task ${data.task_id} advanced to ${data.status}. Waiting for the next approval.`);
                     currentTaskId = data.task_id;
                     startPolling();
-                } else if (data.status === 'ready_for_engineering') {
-                    showMessage(`Task ${data.task_id} is ready for Engineering.`);
+                } else if (data.status === 'ready_for_gtm') {
+                    showMessage(`Task ${data.task_id} is ready for GTM.`);
                     currentTaskId = null;
                 } else if (data.status === 'rejected') {
                     showMessage(`Task ${data.task_id} was rejected. Manual review required.`, true);

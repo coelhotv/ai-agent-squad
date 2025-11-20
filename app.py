@@ -59,6 +59,9 @@ class Task(Base):
     user_stories = Column(Text, nullable=True)
     user_flow_diagram = Column(Text, nullable=True)
     wireframe_html = Column(Text, nullable=True)
+    engineering_file_name = Column(Text, nullable=True)
+    engineering_code = Column(Text, nullable=True)
+    qa_review = Column(Text, nullable=True)
 
 Base.metadata.create_all(bind=engine)
 
@@ -69,7 +72,16 @@ def ensure_column(column_name: str):
         with engine.connect() as conn:
             conn.execute(text(f"ALTER TABLE tasks ADD COLUMN {column_name} TEXT"))
 
-for col_name in ("research_summary", "prd_summary", "user_stories", "user_flow_diagram", "wireframe_html"):
+for col_name in (
+    "research_summary",
+    "prd_summary",
+    "user_stories",
+    "user_flow_diagram",
+    "wireframe_html",
+    "engineering_file_name",
+    "engineering_code",
+    "qa_review",
+):
     ensure_column(col_name)
 
 def get_db():
@@ -90,6 +102,9 @@ class AgentState(TypedDict):
     user_stories: Optional[str]
     user_flow_diagram: Optional[str]
     wireframe_html: Optional[str]
+    engineering_file_name: Optional[str]
+    engineering_code: Optional[str]
+    qa_review: Optional[str]
 
 # Keep the async connection open for the lifetime of the app and close on shutdown.
 _checkpointer_stack = AsyncExitStack()
@@ -697,6 +712,163 @@ def fallback_wireframe_html(product_idea: str) -> str:
     )
 
 
+def generate_engineering_prototype(
+    product_idea: str,
+    prd_summary: str | None,
+    user_stories: str | None,
+    user_flow_diagram: str | None,
+    wireframe_html: str | None,
+) -> tuple[str, str]:
+    engineering_schema = {
+        "type": "object",
+        "properties": {
+            "file_name": {"type": "string"},
+            "code": {"type": "string"},
+        },
+        "required": ["file_name", "code"],
+    }
+    system_prompt = (
+        "You are a Senior Python Engineer. Your goal is to write a single-file FastAPI prototype.\n"
+        "RULES:\n"
+        "1) Use FastAPI, Pydantic v2 (`from pydantic import BaseModel`), and uvicorn.\n"
+        "2) Return raw JSON only (no Markdown) with keys: file_name, code.\n"
+        "3) code must be a complete runnable script with logging enabled.\n"
+        "4) Do NOT generate HTML/CSS; derive routes and models from the provided stories/flow/wireframe.\n"
+        "5) Use built-in generics (list[str]) and `| None`; do NOT import typing.List or typing.Optional.\n"
+        "6) Include a health/status endpoint, CORS setup, and minimal in-memory storage if data is required.\n"
+        "7) Guard uvicorn launch with if __name__ == '__main__':\n"
+        "8) Avoid auth/session layers unless explicitly required by the PRD/stories.\n"
+        "8) Keep comments minimal and only when clarifying non-obvious logic.\n"
+    )
+    user_prompt = f"""
+    Product idea: {product_idea}
+    PRD (context): {prd_summary or 'Unavailable.'}
+    User stories + AC:
+    {user_stories or 'Unavailable.'}
+
+    User flow (Mermaid):
+    {user_flow_diagram or 'Unavailable.'}
+
+    Wireframe structure (HTML/Tailwind for reference on fields):
+    {wireframe_html or 'Unavailable.'}
+
+    Derive endpoint names, payloads, and models from the stories/flow/wireframe. Prefer simple CRUD-style routes,
+    JSON responses, and basic validation. Include error handling (404/400) and logging.
+    """
+    parsed = call_ollama_json(
+        system_prompt, user_prompt, engineering_schema, reasoning=False
+    )
+    if parsed and parsed.get("file_name") and parsed.get("code"):
+        return parsed["file_name"], parsed["code"]
+
+    fallback_code = (
+        "import logging\n"
+        "from fastapi import FastAPI, HTTPException\n"
+        "from fastapi.middleware.cors import CORSMiddleware\n"
+        "from pydantic import BaseModel\n"
+        "from typing import Dict\n\n"
+        "logging.basicConfig(level=logging.INFO)\n"
+        "logger = logging.getLogger(__name__)\n\n"
+        "app = FastAPI(title=\"Prototype\", version=\"0.1.0\")\n"
+        "app.add_middleware(\n"
+        "    CORSMiddleware,\n"
+        "    allow_origins=[\"*\"],\n"
+        "    allow_credentials=True,\n"
+        "    allow_methods=[\"*\"],\n"
+        "    allow_headers=[\"*\"],\n"
+        ")\n\n"
+        "class Item(BaseModel):\n"
+        "    name: str\n"
+        "    description: str | None = None\n\n"
+        "store: Dict[str, Item] = {}\n\n"
+        "@app.get(\"/health\")\n"
+        "def health():\n"
+        "    return {\"status\": \"ok\"}\n\n"
+        "@app.post(\"/items\")\n"
+        "def create_item(item: Item):\n"
+        "    if item.name in store:\n"
+        "        raise HTTPException(status_code=400, detail=\"Item exists\")\n"
+        "    store[item.name] = item\n"
+        "    logger.info(\"Created item %s\", item.name)\n"
+        "    return item\n\n"
+        "@app.get(\"/items/{name}\")\n"
+        "def read_item(name: str):\n"
+        "    item = store.get(name)\n"
+        "    if not item:\n"
+        "        raise HTTPException(status_code=404, detail=\"Not found\")\n"
+        "    return item\n\n"
+        "if __name__ == \"__main__\":\n"
+        "    import uvicorn\n"
+        "    uvicorn.run(app, host=\"0.0.0.0\", port=8000)\n"
+    )
+    return "main.py", fallback_code
+
+
+def run_qa_review(
+    product_idea: str,
+    prd_summary: str | None,
+    user_stories: str | None,
+    engineering_code: str | None,
+) -> str:
+    qa_schema = {
+        "type": "object",
+        "properties": {
+            "verdict": {"type": "string", "enum": ["pass", "fail"]},
+            "findings": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "severity": {"type": "string"},
+                        "title": {"type": "string"},
+                        "details": {"type": "string"},
+                    },
+                    "required": ["severity", "title", "details"],
+                },
+            },
+            "recommendations": {"type": "array", "items": {"type": "string"}},
+        },
+        "required": ["verdict", "findings"],
+    }
+    system_prompt = (
+        "You are a Senior QA Engineer reviewing a FastAPI prototype. "
+        "Output JSON only, matching the provided schema. Focus on correctness versus the PRD/user stories: "
+        "routes, payloads, validation, error handling, logging, and any security/cors concerns. "
+        "Be concise and actionable."
+    )
+    user_prompt = f"""
+    Product idea: {product_idea}
+    PRD: {prd_summary or 'Unavailable.'}
+    User stories: {user_stories or 'Unavailable.'}
+
+    Prototype code to review:
+    {engineering_code or 'Unavailable.'}
+
+    Identify mismatches, missing routes, validation gaps, and risky logic. If code is missing, flag as fail.
+    """
+    parsed = call_ollama_json(
+        system_prompt, user_prompt, qa_schema, reasoning=False
+    )
+    if not parsed:
+        return "QA review unavailable. No structured response returned."
+
+    lines = [f"Verdict: {parsed.get('verdict', 'unknown')}"]
+    findings = parsed.get("findings") or []
+    if findings:
+        lines.append("Findings:")
+        for finding in findings:
+            sev = finding.get("severity") or "info"
+            title = finding.get("title") or "Issue"
+            details = finding.get("details") or ""
+            lines.append(f"- [{sev}] {title}: {details}")
+    recs = parsed.get("recommendations") or []
+    if recs:
+        lines.append("Recommendations:")
+        for rec in recs:
+            lines.append(f"- {rec}")
+    return "\n".join(lines).strip()
+
+
 def run_duckduckgo_research(product_idea: str) -> str:
     """Fallback DuckDuckGo search with multiple strategies."""
     def format_results(results):
@@ -805,9 +977,42 @@ def ux_design_node(state: AgentState):
     return state
 
 
+def engineering_node(state: AgentState):
+    logger.info(f"--- Node: engineering_node (Task ID: {state['task_id']}) ---")
+    file_name, code = generate_engineering_prototype(
+        state['product_idea'],
+        state.get('prd_summary'),
+        state.get('user_stories'),
+        state.get('user_flow_diagram'),
+        state.get('wireframe_html'),
+    )
+    state['engineering_file_name'] = file_name
+    state['engineering_code'] = code
+    state['status'] = "pending_engineering_approval"
+    state['pending_approval_content'] = (
+        "Review the generated backend prototype. Approve to send it to QA."
+    )
+    return state
+
+
+def qa_review_node(state: AgentState):
+    logger.info(f"--- Node: qa_review_node (Task ID: {state['task_id']}) ---")
+    state['qa_review'] = run_qa_review(
+        state['product_idea'],
+        state.get('prd_summary'),
+        state.get('user_stories'),
+        state.get('engineering_code'),
+    )
+    state['status'] = "pending_qa_approval"
+    state['pending_approval_content'] = (
+        "QA review completed. Approve to hand off to GTM."
+    )
+    return state
+
+
 def approved_node(state: AgentState):
     logger.info(f"--- Node: approved_node (Task ID: {state['task_id']}) ---")
-    state['status'] = "ready_for_engineering"
+    state['status'] = "ready_for_gtm"
     state['pending_approval_content'] = None
     return state
 
@@ -817,12 +1022,16 @@ workflow.add_node("research", research_node)
 workflow.add_node("product_prd", product_prd_node)
 workflow.add_node("product_stories", product_stories_node)
 workflow.add_node("ux_design", ux_design_node)
+workflow.add_node("engineering", engineering_node)
+workflow.add_node("qa_review", qa_review_node)
 workflow.add_node("approved", approved_node)
 workflow.set_entry_point("research")
 workflow.add_edge("research", "product_prd")
 workflow.add_edge("product_prd", "product_stories")
 workflow.add_edge("product_stories", "ux_design")
-workflow.add_edge("ux_design", "approved")
+workflow.add_edge("ux_design", "engineering")
+workflow.add_edge("engineering", "qa_review")
+workflow.add_edge("qa_review", "approved")
 workflow.add_edge("approved", END)
 
 
@@ -834,7 +1043,14 @@ async def initialize_graph():
     )
     app_graph = workflow.compile(
         checkpointer=memory_saver,
-        interrupt_before=["product_prd", "product_stories", "ux_design", "approved"]
+        interrupt_before=[
+            "product_prd",
+            "product_stories",
+            "ux_design",
+            "engineering",
+            "qa_review",
+            "approved",
+        ],
     )
 
 
@@ -844,7 +1060,18 @@ def get_app_graph():
     return app_graph
 
 # --- FastAPI Application ---
-app = FastAPI(title="Multi-Agent Product Squad API", version="1.5.0")
+async def lifespan(app: FastAPI):
+    log_environment_status()
+    await initialize_graph()
+    logger.info("LangGraph initialized with AsyncSqliteSaver.")
+    try:
+        yield
+    finally:
+        await _checkpointer_stack.aclose()
+        logger.info("LangGraph resources closed.")
+
+
+app = FastAPI(title="Multi-Agent Product Squad API", version="1.5.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -852,19 +1079,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-
-@app.on_event("startup")
-async def on_startup():
-    log_environment_status()
-    await initialize_graph()
-    logger.info("LangGraph initialized with AsyncSqliteSaver.")
-
-
-@app.on_event("shutdown")
-async def on_shutdown():
-    await _checkpointer_stack.aclose()
-    logger.info("LangGraph resources closed.")
 
 # --- Pydantic Models for API ---
 class StartTaskRequest(BaseModel):
@@ -880,6 +1094,9 @@ class TaskStatus(BaseModel):
     user_stories: Optional[str] = None
     user_flow_diagram: Optional[str] = None
     wireframe_html: Optional[str] = None
+    engineering_file_name: Optional[str] = None
+    engineering_code: Optional[str] = None
+    qa_review: Optional[str] = None
     class Config:
         from_attributes = True
 
@@ -890,6 +1107,9 @@ class ArtifactUpdate(BaseModel):
     user_stories: Optional[str] = None
     user_flow_diagram: Optional[str] = None
     wireframe_html: Optional[str] = None
+    engineering_file_name: Optional[str] = None
+    engineering_code: Optional[str] = None
+    qa_review: Optional[str] = None
 
 
 class RespondToApprovalRequest(BaseModel):
@@ -903,6 +1123,8 @@ PENDING_STATUSES = {
     "pending_prd_approval",
     "pending_story_approval",
     "pending_ux_approval",
+    "pending_engineering_approval",
+    "pending_qa_approval",
     "pending_approval",
 }
 
@@ -923,6 +1145,9 @@ def apply_artifact_overrides(task_id: str, overrides: ArtifactUpdate, db: Sessio
         "user_stories",
         "user_flow_diagram",
         "wireframe_html",
+        "engineering_file_name",
+        "engineering_code",
+        "qa_review",
     ):
         value = getattr(overrides, field)
         if value is not None:
@@ -995,6 +1220,8 @@ def get_pending_approval(db: Session = Depends(get_db)):
         "pending_prd_approval",
         "pending_story_approval",
         "pending_ux_approval",
+        "pending_engineering_approval",
+        "pending_qa_approval",
         "pending_approval",  # backward compatibility
     ]
     pending_task = (
@@ -1034,6 +1261,9 @@ def export_tasks(db: Session = Depends(get_db)):
             "User Stories",
             "User Flow Diagram",
             "Wireframe HTML",
+            "Engineering File Name",
+            "Engineering Code",
+            "QA Review",
             "Pending Approval Content",
         ]
     )
@@ -1048,6 +1278,9 @@ def export_tasks(db: Session = Depends(get_db)):
                 task.user_stories or "",
                 task.user_flow_diagram or "",
                 task.wireframe_html or "",
+                task.engineering_file_name or "",
+                task.engineering_code or "",
+                task.qa_review or "",
                 task.pending_approval_content or "",
             ]
         )
@@ -1065,6 +1298,8 @@ async def respond_to_approval(request: RespondToApprovalRequest, db: Session = D
         "pending_prd_approval",
         "pending_story_approval",
         "pending_ux_approval",
+        "pending_engineering_approval",
+        "pending_qa_approval",
         "pending_approval",
     }
     db_task = db.query(Task).filter(Task.task_id == request.task_id).first()
@@ -1098,6 +1333,9 @@ async def respond_to_approval(request: RespondToApprovalRequest, db: Session = D
         'user_stories',
         'user_flow_diagram',
         'wireframe_html',
+        'engineering_file_name',
+        'engineering_code',
+        'qa_review',
     ]
     for field in artifact_fields:
         current_value = getattr(db_task, field)
@@ -1127,7 +1365,9 @@ def get_next_status(current_status: Optional[str]) -> Optional[str]:
         "pending_prd_approval",
         "pending_story_approval",
         "pending_ux_approval",
-        "ready_for_engineering",
+        "pending_engineering_approval",
+        "pending_qa_approval",
+        "ready_for_gtm",
         "completed",
         "rejected",
     ]

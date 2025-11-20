@@ -149,15 +149,15 @@ This is the most critical part of our setup. We are balancing performance with i
 5. The dashboard and intake UI has a new version where the HITL could collaborate with the agents, actually reviewing/ editing each artifact once its ready for approval. WHen editing the artifact, the UI opens an overlay edit box with options to `Save` or `Cancel`.
 
 
-**Phase 5: The Build Sprint - "Engineering" & "QA" Agents - (NEXT)**
+**Phase 5: The Build Sprint - "Engineering" & "QA" Agents - (COMPLETED)**
 
 - **Goal:** Add the "Engineering" and "QA" agents to write and review code.
 
 - **Actions:**
 
-1. Add `Engineering_Agent` and `QA_Agent` nodes.
+1. Added `engineering` and `qa_review` nodes. Engineering generates a single-file FastAPI prototype (filename + code) using the coding model.
 
-2. Implement the code-review-approval loop.
+2. Implemented the QA code-review loop with `pending_engineering_approval` and `pending_qa_approval` gating before handing off to GTM.
 
 **Phase 6: The "Ship" - "GTM" & Final Output**
 

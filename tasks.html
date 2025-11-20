@@ -117,9 +117,26 @@
             overflow: hidden;
             border-radius: 10px;
             box-shadow: 0 10px 25px rgba(15, 23, 42, 0.3);
+            overflow-x: auto;
         }
         .table-wrapper table {
             margin: 0;
+            table-layout: fixed;
+            min-width: 1200px;
+        }
+        .wide-cell {
+            max-height: 8rem;
+            overflow-y: auto;
+            border: 1px solid #1f2937;
+            border-radius: 8px;
+            padding: 0.5rem;
+            background: #0b1224;
+        }
+        .wide-cell pre {
+            margin: 0;
+            font-size: 0.78rem;
+            line-height: 1.35;
+            white-space: pre-wrap;
         }
         @media (max-width: 768px) {
             .actions {
@@ -179,12 +196,15 @@
                     <td>${task.task_id}</td>
                     <td>${escapeHtml(task.product_idea || '')}</td>
                     <td class="status ${task.status}">${task.status}</td>
-                    <td>${escapeHtml(task.research_summary || '')}</td>
-                    <td>${escapeHtml(task.prd_summary || '')}</td>
-                    <td>${escapeHtml(task.user_stories || '')}</td>
+                    <td><div class="wide-cell"><pre>${escapeHtml(task.research_summary || '')}</pre></div></td>
+                    <td><div class="wide-cell"><pre>${escapeHtml(task.prd_summary || '')}</pre></div></td>
+                    <td><div class="wide-cell"><pre>${escapeHtml(task.user_stories || '')}</pre></div></td>
+                    <td><div class="wide-cell"><pre>${escapeHtml(task.user_flow_diagram || '')}</pre></div></td>
+                    <td><div class="wide-cell"><pre>${escapeHtml(task.wireframe_html || '')}</pre></div></td>
+                    <td>${escapeHtml(task.engineering_file_name || '')}</td>
+                    <td><div class="wide-cell"><pre>${escapeHtml(task.engineering_code || '')}</pre></div></td>
+                    <td><div class="wide-cell"><pre>${escapeHtml(task.qa_review || '')}</pre></div></td>
                     <td>${escapeHtml(task.pending_approval_content || '')}</td>
-                    <td><pre>${escapeHtml(task.user_flow_diagram || '')}</pre></td>
-                    <td><pre>${escapeHtml(task.wireframe_html || '')}</pre></td>
                 </tr>
             `).join('');
 
@@ -199,9 +219,12 @@
                                 <th>Research Summary</th>
                                 <th>PRD Summary</th>
                                 <th>User Stories</th>
-                                <th>Pending Approval Content</th>
                                 <th>User Flow Diagram</th>
                                 <th>Wireframe HTML</th>
+                                <th>Engineering File</th>
+                                <th>Engineering Code</th>
+                                <th>QA Review</th>
+                                <th>Pending Approval Content</th>
                             </tr>
                         </thead>
                         <tbody>
