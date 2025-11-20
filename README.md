@@ -30,7 +30,7 @@ Refer to `DOCS/setup.md` for environment variables, dependency notes, and option
 - The refreshed intake UI shows a real-time status pill, workflow stage cards, and the latest response message directly beneath the submission card to keep operators oriented.
 - `tasks.html` polls `/tasks` every five seconds and offers an export button that hits `/tasks/export`.
 
-See `DOCS/workflow.md` for the full narrative, including how checkpoints resume when humans approve.
+See `DOCS/workflow.md` for the full narrative, including how checkpoints resume when humans approve and how pending work is restored at startup before new ideas can be submitted.
 
 ## Next Steps
 

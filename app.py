@@ -236,7 +236,7 @@ def call_perplexity_json(
     }
 
     start_time = time.time()
-    with httpx.Client(timeout=120) as client:
+    with httpx.Client(timeout=90) as client:
         response = client.post(PERPLEXITY_API_URL, headers=headers, json=payload)
         if response.status_code >= 400:
             logger.error(
@@ -281,7 +281,7 @@ def call_ollama_json(
 
     try:
         start_time = time.time()
-        with httpx.Client(timeout=180) as client:
+        with httpx.Client(timeout=240) as client:
             response = client.post(f"{OLLAMA_BASE_URL}api/generate", json=payload)
             response.raise_for_status()
             data = response.json()
@@ -369,13 +369,9 @@ def generate_prd_document(product_idea: str, research_summary: str | None) -> st
                 "type": "array",
                 "items": {"type": "string"}
             },
-            "scope": {
-                "type": "object",
-                "properties": {
-                    "in_scope": {"type": "array", "items": {"type": "string"}},
-                    "out_of_scope": {"type": "array", "items": {"type": "string"}},
-                },
-                "required": ["in_scope", "out_of_scope"],
+            "product_scope": {
+                "type": "array",
+                "items": {"type": "string"}
             },
             "success_criteria": {
                 "type": "array",
@@ -386,7 +382,7 @@ def generate_prd_document(product_idea: str, research_summary: str | None) -> st
             "executive_summary",
             "market_opportunity",
             "customer_needs",
-            "scope",
+            "product_scope",
             "success_criteria",
         ]
     }    
@@ -408,14 +404,7 @@ def generate_prd_document(product_idea: str, research_summary: str | None) -> st
                     "executive_summary": {"type": "string"},
                     "market_opportunity": {"type": "array", "items": {"type": "string"}},
                     "customer_needs": {"type": "array", "items": {"type": "string"}},
-                    "product_scope": {
-                        "type": "object",
-                        "properties": {
-                            "in_scope": {"type": "array", "items": {"type": "string"}},
-                            "out_of_scope": {"type": "array", "items": {"type": "string"}},
-                        },
-                        "required": ["in_scope", "out_of_scope"],
-                    },
+                    "product_scope": {"type": "array", "items": {"type": "string"}},
                     "success_criteria": {"type": "array", "items": {"type": "string"}},
                 },
                 "required": [
@@ -438,15 +427,9 @@ def generate_prd_document(product_idea: str, research_summary: str | None) -> st
     lines.append("\nCustomer Needs:")
     for item in parsed.get("customer_needs", [])[:4]:
         lines.append(f"- {item}")
-    scope = parsed.get("product_scope", {})
-    if scope.get("in_scope"):
-        lines.append("\nIn Scope:")
-        for item in scope["in_scope"][:4]:
-            lines.append(f"- {item}")
-    if scope.get("out_of_scope"):
-        lines.append("\nOut of Scope:")
-        for item in scope["out_of_scope"][:3]:
-            lines.append(f"- {item}")
+    lines.append("\nProduct Scope and Use cases:")
+    for item in parsed.get("product_scope", [])[:4]:
+        lines.append(f"- {item}")
     lines.append("\nSuccess Criteria:")
     for item in parsed.get("success_criteria", [])[:3]:
         lines.append(f"- {item}")
@@ -460,9 +443,8 @@ def fallback_prd(product_idea: str, research_summary: str | None) -> str:
         f"- Based on research: {research_summary or 'insights pending.'}\n"
         "- Target early adopters and gather feedback.\n\nCustomer Needs:\n"
         "- Simple onboarding\n- Clear value communication\n- Feedback loop\n\n"
-        "In Scope:\n- Pilot use case that validates demand\n"
-        "- Internal admin dashboard for basic tracking\n\nOut of Scope:\n"
-        "- Multi-user collaboration\n- Advanced analytics\n\nSuccess Criteria:\n"
+        "Product Scope:\n- Pilot use case that validates demand\n"
+        "- Internal admin dashboard for basic tracking\n\nSuccess Criteria:\n"
         "- 10 pilot sign-ups\n- 60% repeat usage in 2 weeks\n- Qualitative feedback on usability"
     )
 
@@ -492,7 +474,7 @@ def generate_user_stories(product_idea: str, prd_summary: str | None) -> str:
     system_prompt = (
         "You are a senior PM writing crisp user stories with acceptance criteria."
         ' Follow the format "As a [user type], I want [goal] so that [benefit]."'
-        " Keep scope tight for v0 and stay within the provided PRD."
+        " Keep scope tight for v0 (MVP) and stay within the provided PRD."
     )
     user_prompt = (
         f"Idea: {product_idea}.\nPRD context: {prd_summary or 'Unavailable.'}\n"
@@ -579,7 +561,7 @@ def generate_user_flow_diagram(product_idea: str, user_stories: str | None) -> s
     }    
     system_prompt = (
         "You are an expert UX Architect. Your goal is to create a clear, logical Mermaid user flow diagram "
-        "based on the provided product idea and user stories. "
+        "based on the provided product idea, its estabished user stories and acceptance criterias. "
         "You MUST output a JSON object that adheres strictly to the provided schema."
     )
     user_prompt = f"""
@@ -592,8 +574,8 @@ def generate_user_flow_diagram(product_idea: str, user_stories: str | None) -> s
          - Use the 'nodes_list' field in the JSON to plan these steps first.
          2. **Node Types:**
          - Use standard rectangular nodes `[ ]` for User Actions (e.g., `A[User clicks Login]`).
-         - Use diamond nodes `{{ }}` for System Decisions or logic checks (e.g., `B{{ Is Valid? }}`).
-         - Ensure the flow has a clear Start and End.
+         - If needed, use diamond nodes `{{ }}` for System Decisions or logic checks (e.g., `B{{ Is Valid? }}`).
+         - Ensure the flow has a clear Start and End that commits to the core product idea.
          3. **Mermaid Syntax Rules:**
          - Use simple, alphanumeric IDs for nodes (e.g., `Step1`, `Step2`). Do NOT use spaces in IDs.
          - Put the descriptive text inside the brackets/parentheses.
@@ -627,15 +609,15 @@ def generate_wireframe_html(product_idea: str, user_stories: str | None, flow_di
         "properties": {
             "html_content": {
                 "type": "string",
-                "description": "The raw HTML elements. Do NOT include <html>, <head>, or <body> tags. Just the div structures."
+                "description": "The raw HTML elements. Do NOT include <html>, <head>, or <body> tags. Just the <div> structures."
             }
         },
         "required": ["html_content"]
     }    
     system_prompt = (
-        "You are a Senior UI/UX Prototyper. Your goal is to create a low-fidelity wireframe using HTML and Tailwind CSS. "
-        "Use the user stories, acceptance criteria, and user flow as inputs. "
+        "You are a Senior UI/UX Prototyper. Your goal is to create a low-fidelity wireframe writing HTML and Tailwind CSS code. "
         "Think in terms of reusable components like headers, cards, and sections."
+        "Use the user stories, acceptance criteria, and user flow as inputs. "
     )
     user_prompt = f"""
         Idea: {product_idea}.
@@ -647,16 +629,16 @@ def generate_wireframe_html(product_idea: str, user_stories: str | None, flow_di
         {flow_diagram or 'Unavailable.'}
 
         ### DESIGN RULES:
-        1. **Aesthetic:** Stick to low-fidelity design. 
+        ## **Aesthetic:** Stick to a low-fidelity wireframe design. 
         - Use 'grayscale' style when possible.
         - Use borders (`border`, `border-gray-300`) to define areas.
 
-        2. **Images:** Do NOT use <img> tags requiring external URLs.
+        ##. **Images:** Do NOT use <img> tags requiring external URLs.
         - Instead, use placeholder divs: `<div class="w-full h-48 bg-gray-300 flex items-center justify-center">Image Placeholder</div>`
 
-        3. **Typography:** Use standard sans-serif. Use `font-bold` for headers.
+        ## **Typography:** Use standard sans-serif. Use `font-bold` for headers.
 
-        4. **Output:** - Provide ONLY the HTML structure (divs, sections, columns) aligned with the user flow.
+        4. **Output:** - Provide ONLY the HTML structure (divs, sections, columns) aligned with the user flow and user stories.
         - Do not write the <!DOCTYPE> or <body> tags; just the content inside.
     """
     parsed = call_ollama_json(system_prompt, user_prompt, wireframe_schema)
@@ -880,6 +862,7 @@ class TaskStatus(BaseModel):
         from_attributes = True
 
 class ArtifactUpdate(BaseModel):
+    task_id: str
     research_summary: Optional[str] = None
     prd_summary: Optional[str] = None
     user_stories: Optional[str] = None
@@ -890,7 +873,7 @@ class ArtifactUpdate(BaseModel):
 class RespondToApprovalRequest(BaseModel):
     task_id: str
     approved: bool
-    overrides: Optional[ArtifactUpdate] = None
+    overrides: ArtifactUpdate | None = None
 
 
 PENDING_STATUSES = {
@@ -1066,9 +1049,6 @@ async def respond_to_approval(request: RespondToApprovalRequest, db: Session = D
     if not db_task or db_task.status not in pending_statuses:
         raise HTTPException(status_code=404, detail="Task not found or not pending approval.")
 
-    if request.overrides:
-        apply_artifact_overrides(request.task_id, request.overrides, db)
-
     if not request.approved:
         db_task.status = 'rejected'
         db_task.pending_approval_content = None
@@ -1076,32 +1056,31 @@ async def respond_to_approval(request: RespondToApprovalRequest, db: Session = D
         logger.info(f"Task {request.task_id} rejected by human.")
         return TaskStatus.from_orm(db_task)
 
+    resolved_status = get_next_status(current_status=request.overrides.get('status') if request.overrides else None)
     logger.info(f"Task {request.task_id} approved by human. Resuming graph.")
-    
+
     # 1. Define the config to resume the correct graph instance
     config = {"configurable": {"thread_id": request.task_id}}
     graph = get_app_graph()
-    
+
     # 2. Invoke the graph again. The checkpointer loads the state automatically.
-    # We pass `None` as the state because the checkpointer is handling it.
-    state = await graph.aget_state(config)
-    overrides = request.overrides
-    if overrides:
-        for field in ("research_summary", "prd_summary", "user_stories", "user_flow_diagram", "wireframe_html"):
-            value = getattr(overrides, field)
-            if value is not None:
-                state.values[field] = value
-    final_state = await graph.ainvoke(state, config)
+    final_state = await graph.ainvoke(None, config)
     logger.info(f"Graph for task {request.task_id} advanced to state '{final_state.get('status')}'.")
 
     # 3. Update our application DB with the new status/content
     db_task.status = final_state.get('status', db_task.status)
     db_task.pending_approval_content = final_state.get('pending_approval_content')
-    db_task.research_summary = final_state.get('research_summary', db_task.research_summary)
-    db_task.prd_summary = final_state.get('prd_summary', db_task.prd_summary)
-    db_task.user_stories = final_state.get('user_stories', db_task.user_stories)
-    db_task.user_flow_diagram = final_state.get('user_flow_diagram', db_task.user_flow_diagram)
-    db_task.wireframe_html = final_state.get('wireframe_html', db_task.wireframe_html)
+    artifact_fields = [
+        'research_summary',
+        'prd_summary',
+        'user_stories',
+        'user_flow_diagram',
+        'wireframe_html',
+    ]
+    for field in artifact_fields:
+        current_value = getattr(db_task, field)
+        new_value = final_state.get(field) if final_state else None
+        setattr(db_task, field, current_value or new_value)
     db.commit()
     logger.info(f"Task {request.task_id} updated in DB to final status '{db_task.status}'.")
     
@@ -1119,3 +1098,23 @@ def read_root():
 @app.get("/tasks_dashboard", include_in_schema=False)
 async def read_tasks_dashboard():
     return FileResponse("tasks.html")
+def get_next_status(current_status: Optional[str]) -> Optional[str]:
+    workflow_order = [
+        "starting",
+        "pending_research_approval",
+        "pending_prd_approval",
+        "pending_story_approval",
+        "pending_ux_approval",
+        "ready_for_engineering",
+        "completed",
+        "rejected",
+    ]
+    if not current_status:
+        return None
+    try:
+        idx = workflow_order.index(current_status)
+    except ValueError:
+        return current_status
+    if idx + 1 < len(workflow_order):
+        return workflow_order[idx + 1]
+    return current_status

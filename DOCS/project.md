@@ -96,6 +96,7 @@ This is the most critical part of our setup. We are balancing performance with i
 
 8. Confirmed a fast, successful "Hello, World!" test.
 
+
 **Phase 2: The Core Loop - "Coordinator" & HITL UI - (COMPLETED & REFINED)**
 
 - **Goal:** Build a robust, persistent `Intake -> Approve -> End` loop.
@@ -112,6 +113,7 @@ This is the most critical part of our setup. We are balancing performance with i
     *   `checkpoints.sqlite`: For the LangGraph agent's detailed execution state.
 6.  This new architecture dramatically simplifies the code and makes the pause/resume cycle much more reliable.
 
+
 **Phase 3: The First Specialist - "Research" Agent - (COMPLETED)**
 
 - **Goal:** Add the "Research" agent and give it a tool.
@@ -126,6 +128,7 @@ This is the most critical part of our setup. We are balancing performance with i
 
 4. Documented environment configuration for `PERPLEXITY_API_KEY` so the integration can run inside Docker.
 
+
 **Phase 4: The Design Sprint - "Product" & "UX" Agents - (COMPLETED)**
 
 - **Goal:** Add the "Product" and "UX/Designer" agents.
@@ -139,6 +142,9 @@ This is the most critical part of our setup. We are balancing performance with i
 3. UX agent now generates Mermaid user flows and feeds the same context into the Tailwind wireframe generator so both artifacts stay in sync.
 
 4. The dashboard and intake UI were updated with buttons that open flow/wireframe previews in a new tab; `/tasks_dashboard` and CSV exports now include the `user_flow_diagram` and `wireframe_html` columns, keeping UX artifacts visible everywhere.
+
+5. The dashboard and intake UI has a new version where the HITL could collaborate with the agents, actually reviewing/ editing each artifact once its ready for approval. WHen editing the artifact, the UI opens an overlay edit box with options to `Save` or `Cancel`.
+
 
 **Phase 5: The Build Sprint - "Engineering" & "QA" Agents - (NEXT)**
 

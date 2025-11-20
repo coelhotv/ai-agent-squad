@@ -5,6 +5,7 @@
 - Watch Docker logs with `docker-compose logs -f app_service` to view LangGraph progress statements (`logger.info` calls in `research_node`, `product_prd_node`, etc.).
 - Use `docker stats app_service` if you suspect resource contention.
 - Health-check the UI endpoints at `http://localhost:8000` and `http://localhost:8000/tasks_dashboard`.
+- On startup the intake page queries `/get_pending_approval` and locks the submission form if a previous workflow is still waiting, so you must finish that work before starting a new idea.
 - Checkpoint resilience: even if the backend restarts, `checkpoints.sqlite` keeps pending graph state so approvals can resume where they left off.
 
 ## Dashboard & CSV Export

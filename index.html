@@ -186,62 +186,6 @@
             flex-wrap: wrap;
             gap: 0.75rem;
         }
-        .artifact-display {
-            position: relative;
-        }
-        .edit-btn {
-            position: absolute;
-            top: 0.75rem;
-            right: 0.75rem;
-            border: none;
-            padding: 0.4rem 0.9rem;
-            border-radius: 999px;
-            background: #2563eb;
-            color: white;
-            font-size: 0.75rem;
-            transition: background 0.2s ease;
-            cursor: pointer;
-        }
-        .edit-btn.secondary {
-            background: #ec4899;
-        }
-        .edit-btn:disabled {
-            background: #cbd5f5;
-            cursor: not-allowed;
-        }
-        .artifact-editor {
-            margin-top: 0.75rem;
-        }
-        .artifact-editor textarea {
-            width: 100%;
-            min-height: 160px;
-            border-radius: 12px;
-            border: 1px solid #cbd5f5;
-            padding: 0.75rem;
-            font-family: "Menlo", "Consolas", monospace;
-            resize: vertical;
-        }
-        .editor-actions {
-            margin-top: 0.5rem;
-            display: flex;
-            gap: 0.5rem;
-        }
-        .editor-actions button {
-            flex: 1;
-            border: none;
-            border-radius: 999px;
-            padding: 0.5rem 1rem;
-            cursor: pointer;
-            background: #2563eb;
-            color: white;
-            font-weight: 600;
-        }
-        .editor-actions button.secondary {
-            background: #dc2626;
-        }
-        .artifact-editor.hidden {
-            display: none;
-        }
         details {
             flex: 1;
             min-width: 260px;
@@ -255,6 +199,111 @@
             font-weight: 600;
             cursor: pointer;
             outline: none;
+        }
+        .artifact-row {
+            position: relative;
+        }
+        .artifact-row pre {
+            margin: 0;
+            background: #0f172a;
+            color: #f8fafc;
+            border-radius: 10px;
+            padding: 0.9rem;
+            font-size: 0.95rem;
+            line-height: 1.5;
+            white-space: pre-wrap;
+            min-height: 100px;
+        }
+        .edit-btn {
+            position: absolute;
+            top: 0.75rem;
+            right: 0.75rem;
+            border: none;
+            border-radius: 999px;
+            padding: 0.35rem 0.9rem;
+            background: #2563eb;
+            color: white;
+            font-size: 0.75rem;
+            cursor: pointer;
+            box-shadow: 0 8px 20px rgba(37, 99, 235, 0.35);
+        }
+        .overlay {
+            position: fixed;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(15, 23, 42, 0.6);
+            padding: 2rem;
+            z-index: 60;
+        }
+        .overlay.hidden {
+            display: none;
+        }
+        .overlay-card {
+            width: min(75vw, 1000px);
+            max-height: 80vh;
+            background: white;
+            border-radius: 24px;
+            padding: 1.5rem;
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+            box-shadow: 0 40px 80px rgba(15, 23, 42, 0.25);
+        }
+        .overlay-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .overlay-close {
+            border: none;
+            background: transparent;
+            font-size: 1.3rem;
+            cursor: pointer;
+        }
+        .overlay-card textarea {
+            width: 100%;
+            height: 400px;
+            border-radius: 14px;
+            border: 1px solid #cbd5f5;
+            padding: 1rem;
+            font-family: "Menlo", "Consolas", monospace;
+            resize: vertical;
+        }
+        .overlay-actions {
+            display: flex;
+            gap: 0.5rem;
+        }
+        .overlay-actions button {
+            flex: 1;
+            border: none;
+            border-radius: 12px;
+            padding: 0.65rem 1rem;
+            font-weight: 600;
+            background: #2563eb;
+            color: white;
+            cursor: pointer;
+        }
+        .overlay-actions button.secondary {
+            background: #dc2626;
+        }
+        .ux-text-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0.75rem 0.85rem;
+            background: #e2e8f0;
+            border-radius: 10px;
+            margin-top: 0.5rem;
+            font-weight: 600;
+            color: #0f172a;
+        }
+        .ux-text-row .edit-btn {
+            position: static;
+            padding: 0.3rem 0.8rem;
+            font-size: 0.7rem;
+            box-shadow: none;
         }
         pre {
             margin: 0.85rem 0 0;
@@ -316,6 +365,49 @@
             background: #fee2e2;
             border-color: #fca5a5;
             color: #991b1b;
+        }
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(15, 23, 42, 0.65);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 50;
+        }
+        .modal-overlay.hidden {
+            display: none;
+        }
+        .modal-content {
+            width: min(900px, 90%);
+            max-height: 90vh;
+            overflow: auto;
+            background: white;
+            border-radius: 24px;
+            padding: 1.5rem;
+            position: relative;
+            box-shadow: 0 35px 70px rgba(15, 23, 42, 0.35);
+        }
+        .modal-close {
+            position: absolute;
+            top: 1rem;
+            right: 1rem;
+            border: none;
+            background: transparent;
+            font-size: 1.4rem;
+            cursor: pointer;
+            color: #0f172a;
+        }
+        .modal-heading {
+            margin: 0 0 1rem;
+            font-size: 1.35rem;
+        }
+        .modal-body pre {
+            background: #0f172a;
+            color: #f8fafc;
+            padding: 1rem;
+            border-radius: 12px;
+            overflow: auto;
         }
         @media (max-width: 768px) {
             body {
@@ -381,74 +473,39 @@
             <div class="artifact-grid">
                 <details id="research-results">
                     <summary>Research Findings</summary>
-                    <div class="artifact-display">
+                    <div class="artifact-row">
                         <pre id="research-content">No research yet.</pre>
                         <button class="edit-btn" data-artifact="research_summary">Edit</button>
-                    </div>
-                    <div class="artifact-editor hidden" data-artifact="research_summary">
-                        <textarea id="research-editor"></textarea>
-                        <div class="editor-actions">
-                            <button class="save-artifact" data-artifact="research_summary">Save</button>
-                            <button class="cancel-edit" data-artifact="research_summary">Cancel</button>
-                        </div>
                     </div>
                 </details>
                 <details id="prd-results">
                     <summary>PRD Draft</summary>
-                    <div class="artifact-display">
+                    <div class="artifact-row">
                         <pre id="prd-content">No PRD yet.</pre>
                         <button class="edit-btn" data-artifact="prd_summary">Edit</button>
-                    </div>
-                    <div class="artifact-editor hidden" data-artifact="prd_summary">
-                        <textarea id="prd-editor"></textarea>
-                        <div class="editor-actions">
-                            <button class="save-artifact" data-artifact="prd_summary">Save</button>
-                            <button class="cancel-edit" data-artifact="prd_summary">Cancel</button>
-                        </div>
                     </div>
                 </details>
                 <details id="stories-results">
                     <summary>User Stories & Acceptance Criteria</summary>
-                    <div class="artifact-display">
+                    <div class="artifact-row">
                         <pre id="stories-content">No stories yet.</pre>
                         <button class="edit-btn" data-artifact="user_stories">Edit</button>
-                    </div>
-                    <div class="artifact-editor hidden" data-artifact="user_stories">
-                        <textarea id="stories-editor"></textarea>
-                        <div class="editor-actions">
-                            <button class="save-artifact" data-artifact="user_stories">Save</button>
-                            <button class="cancel-edit" data-artifact="user_stories">Cancel</button>
-                        </div>
                     </div>
                 </details>
                 <div class="ux-card">
                     <h3>UX Artifacts</h3>
-                    <div class="artifact-display">
-                        <pre id="flow-content">No diagram yet.</pre>
-                        <button class="edit-btn" data-artifact="user_flow_diagram">Edit Flow</button>
-                    </div>
-                    <div class="artifact-editor hidden" data-artifact="user_flow_diagram">
-                        <textarea id="flow-editor"></textarea>
-                        <div class="editor-actions">
-                            <button class="save-artifact" data-artifact="user_flow_diagram">Save Flow</button>
-                            <button class="cancel-edit" data-artifact="user_flow_diagram">Cancel</button>
-                        </div>
-                    </div>
-                    <div class="artifact-display">
-                        <pre id="wireframe-content">No wireframe yet.</pre>
-                        <button class="edit-btn" data-artifact="wireframe_html">Edit Wireframe</button>
-                    </div>
-                    <div class="artifact-editor hidden" data-artifact="wireframe_html">
-                        <textarea id="wireframe-editor"></textarea>
-                        <div class="editor-actions">
-                            <button class="save-artifact" data-artifact="wireframe_html">Save Wireframe</button>
-                            <button class="cancel-edit" data-artifact="wireframe_html">Cancel</button>
-                        </div>
-                    </div>
                     <p>Preview Mermaid flows and Tailwind wireframes inside a new browser tab.</p>
                     <div class="ux-actions">
                         <button type="button" id="view-flow-btn" disabled>View Flow Diagram</button>
                         <button type="button" id="view-wireframe-btn" class="secondary" disabled>View Wireframe</button>
+                    </div>
+                    <div class="ux-text-row">
+                        <span id="flow-status">No diagram yet.</span>
+                        <button class="edit-btn" data-artifact="user_flow_diagram">Edit</button>
+                    </div>
+                    <div class="ux-text-row">
+                        <span id="wireframe-status">No wireframe yet.</span>
+                        <button class="edit-btn" data-artifact="wireframe_html">Edit</button>
                     </div>
                 </div>
             </div>
@@ -456,6 +513,19 @@
 
     </div>
 
+    <div id="artifact-overlay" class="overlay hidden">
+        <div class="overlay-card">
+            <div class="overlay-header">
+                <h3 id="overlay-title"></h3>
+                <button id="overlay-close" aria-label="Close">×</button>
+            </div>
+            <textarea id="overlay-text"></textarea>
+            <div class="overlay-actions">
+                <button id="overlay-save">Save</button>
+                <button id="overlay-cancel" class="secondary">Cancel</button>
+            </div>
+        </div>
+    </div>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
     <script>
         if (window.mermaid) {
@@ -478,48 +548,27 @@
         const refreshQueueBtn = document.getElementById('force-refresh-btn');
         const viewFlowBtn = document.getElementById('view-flow-btn');
         const viewWireframeBtn = document.getElementById('view-wireframe-btn');
+        const overlay = document.getElementById('artifact-overlay');
+        const overlayTitle = document.getElementById('overlay-title');
+        const overlayText = document.getElementById('overlay-text');
+        const overlaySave = document.getElementById('overlay-save');
+        const overlayCancel = document.getElementById('overlay-cancel');
+        const overlayClose = document.getElementById('overlay-close');
 
         let currentTaskId = null;
         let pollingIntervalId = null;
         let currentStatus = 'starting';
+        let hasPendingTask = false;
+        let editingArtifact = null;
+        const artifactDisplays = {
+            research_summary: document.getElementById('research-content'),
+            prd_summary: document.getElementById('prd-content'),
+            user_stories: document.getElementById('stories-content'),
+            user_flow_diagram: document.getElementById('flow-status'),
+            wireframe_html: document.getElementById('wireframe-status'),
+        };
         let storedFlowDiagram = null;
         let storedWireframeHtml = null;
-
-        const editableStatuses = new Set([
-            'pending_research_approval',
-            'pending_prd_approval',
-            'pending_story_approval',
-            'pending_ux_approval',
-            'pending_approval',
-        ]);
-
-        const artifactConfigs = {
-            research_summary: {
-                display: document.getElementById('research-content'),
-                editor: document.getElementById('research-editor'),
-                container: document.querySelector('.artifact-editor[data-artifact="research_summary"]'),
-            },
-            prd_summary: {
-                display: document.getElementById('prd-content'),
-                editor: document.getElementById('prd-editor'),
-                container: document.querySelector('.artifact-editor[data-artifact="prd_summary"]'),
-            },
-            user_stories: {
-                display: document.getElementById('stories-content'),
-                editor: document.getElementById('stories-editor'),
-                container: document.querySelector('.artifact-editor[data-artifact="user_stories"]'),
-            },
-            user_flow_diagram: {
-                display: document.getElementById('flow-content'),
-                editor: document.getElementById('flow-editor'),
-                container: document.querySelector('.artifact-editor[data-artifact="user_flow_diagram"]'),
-            },
-            wireframe_html: {
-                display: document.getElementById('wireframe-content'),
-                editor: document.getElementById('wireframe-editor'),
-                container: document.querySelector('.artifact-editor[data-artifact="wireframe_html"]'),
-            },
-        };
 
         const workflowSteps = [
             { key: 'starting', label: 'Intake', description: 'Idea capture' },
@@ -530,6 +579,17 @@
             { key: 'ready_for_engineering', label: 'Engineering Handoff', description: 'Build sprint ready' },
             { key: 'completed', label: 'Shipped', description: 'Final deliverables' },
             { key: 'rejected', label: 'Rejected', description: 'Manual review' },
+        ];
+
+        const workflowOrder = [
+            'starting',
+            'pending_research_approval',
+            'pending_prd_approval',
+            'pending_story_approval',
+            'pending_ux_approval',
+            'ready_for_engineering',
+            'completed',
+            'rejected',
         ];
 
         const agentLabels = {
@@ -551,6 +611,21 @@
             return statusAliases[status] || status || 'starting';
         }
 
+        function getNextStage(current) {
+            const idx = workflowOrder.indexOf(current);
+            if (idx === -1 || idx === workflowOrder.length - 1) return current;
+            return workflowOrder[idx + 1];
+        }
+
+        function disableArtifactButtonsForStatus(status) {
+            const names = statusToArtifacts[status] || [];
+            names.forEach(name => {
+                document
+                    .querySelectorAll(`.edit-btn[data-artifact="${name}"]`)
+                    .forEach(btn => (btn.disabled = true));
+            });
+        }
+
         function renderWorkflow(activeStatus) {
             workflowFlow.innerHTML = workflowSteps.map(step => {
                 const isActive = step.key === activeStatus;
@@ -566,6 +641,21 @@
             }).join('');
         }
 
+        const pendingStatuses = new Set([
+            'pending_research_approval',
+            'pending_prd_approval',
+            'pending_story_approval',
+            'pending_ux_approval',
+            'pending_approval',
+        ]);
+
+        const statusToArtifacts = {
+            pending_research_approval: ['research_summary'],
+            pending_prd_approval: ['prd_summary'],
+            pending_story_approval: ['user_stories'],
+            pending_ux_approval: ['user_flow_diagram', 'wireframe_html'],
+        };
+
         function updateCurrentStage(status) {
             currentStatus = normalizeStatus(status);
             const activeLabel = workflowSteps.find(step => step.key === currentStatus) || workflowSteps[0];
@@ -573,12 +663,52 @@
             currentStatusPill.textContent = activeLabel.label;
             currentAgentLabel.textContent = agentTitle;
             renderWorkflow(currentStatus);
-            updateEditControls();
+            document.querySelectorAll('.edit-btn').forEach(btn => {
+                btn.disabled = !pendingStatuses.has(currentStatus);
+            });
         }
 
         function showMessage(message, isError = false) {
             responseMessage.textContent = message;
             responseMessage.className = isError ? 'error' : 'success';
+        }
+
+        function setFormEnabled(enabled) {
+            ideaForm.querySelectorAll('button').forEach(btn => {
+                if (btn.type === 'submit') btn.disabled = !enabled;
+            });
+            productIdeaTextarea.disabled = !enabled;
+        }
+
+        function markPendingTask(data) {
+            hasPendingTask = true;
+            currentTaskId = data.task_id;
+            approvalSection.classList.remove('hidden');
+            approvalContent.textContent = data.pending_approval_content || 'Pending your review.';
+            updateArtifactsFromTask(data);
+            updateCurrentStage(data.status);
+            setFormEnabled(false);
+        }
+
+        function clearPendingTask() {
+            hasPendingTask = false;
+            setFormEnabled(true);
+        }
+
+        async function checkPendingApprovalOnLoad() {
+            try {
+                const response = await fetch(`${API_BASE_URL}/get_pending_approval`);
+                if (!response.ok) return;
+                const data = await response.json();
+                if (data && data.task_id) {
+                    markPendingTask(data);
+                    showMessage('Resuming pending approval.');
+                } else {
+                    clearPendingTask();
+                }
+            } catch (error) {
+                console.error('Pending load error:', error);
+            }
         }
 
         function clearArtifacts() {
@@ -591,17 +721,18 @@
 
         function updateArtifactsFromTask(task) {
             renderArtifact(researchContent, task?.research_summary);
-            artifactConfigs.research_summary.editor.value = task?.research_summary?.trim() || '';
             renderArtifact(prdContent, task?.prd_summary);
-            artifactConfigs.prd_summary.editor.value = task?.prd_summary?.trim() || '';
             renderArtifact(storiesContent, task?.user_stories);
-            artifactConfigs.user_stories.editor.value = task?.user_stories?.trim() || '';
             renderFlowDiagram(task?.user_flow_diagram);
             renderWireframe(task?.wireframe_html);
         }
 
         ideaForm.addEventListener('submit', async (e) => {
             e.preventDefault();
+            if (hasPendingTask) {
+                showMessage('Resolve pending approval before starting another idea.', true);
+                return;
+            }
             const idea = productIdeaTextarea.value.trim();
             if (!idea) {
                 showMessage('Please enter a product idea before continuing.', true);
@@ -668,51 +799,44 @@
         function renderFlowDiagram(diagramText) {
             storedFlowDiagram = diagramText?.trim() || null;
             viewFlowBtn.disabled = !storedFlowDiagram;
-            artifactConfigs.user_flow_diagram.editor.value = storedFlowDiagram || '';
+            artifactDisplays.user_flow_diagram.textContent =
+                storedFlowDiagram ? 'Diagram ready for review' : 'No diagram yet.';
         }
 
         function renderWireframe(htmlText) {
             storedWireframeHtml = htmlText?.trim() || null;
             viewWireframeBtn.disabled = !storedWireframeHtml;
-            artifactConfigs.wireframe_html.editor.value = storedWireframeHtml || '';
+            artifactDisplays.wireframe_html.textContent =
+                storedWireframeHtml ? 'Wireframe ready for review' : 'No wireframe yet.';
         }
 
-        function canEditArtifacts() {
-            return editableStatuses.has(currentStatus);
+        function openOverlay(artifact) {
+            editingArtifact = artifact;
+            overlayTitle.textContent = `Edit ${artifact.replace(/_/g, ' ')}`;
+            if (artifact === 'user_flow_diagram') {
+                overlayText.value = storedFlowDiagram || '';
+            } else if (artifact === 'wireframe_html') {
+                overlayText.value = storedWireframeHtml || '';
+            } else {
+                overlayText.value = artifactDisplays[artifact].textContent.trim();
+            }
+            overlay.classList.remove('hidden');
         }
 
-        function updateEditControls() {
-            const editable = canEditArtifacts();
-            document.querySelectorAll('.edit-btn').forEach(btn => {
-                btn.disabled = !editable;
-            });
+        function closeOverlay() {
+            editingArtifact = null;
+            overlay.classList.add('hidden');
         }
 
-        function openEditor(artifact) {
-            if (!canEditArtifacts()) {
-                showMessage('Cannot edit artifacts while the task is not pending approval.', true);
+        async function saveOverlay() {
+            if (!editingArtifact || !currentTaskId) {
+                closeOverlay();
                 return;
             }
-            const config = artifactConfigs[artifact];
-            if (!config) return;
-            config.editor.value = config.display.textContent.trim();
-            config.container.classList.remove('hidden');
-        }
-
-        function closeEditor(artifact) {
-            const config = artifactConfigs[artifact];
-            if (!config) return;
-            config.container.classList.add('hidden');
-        }
-
-        async function saveArtifact(artifact) {
-            if (!currentTaskId) {
-                showMessage('No task currently awaiting approval.', true);
-                return;
-            }
-            const config = artifactConfigs[artifact];
-            if (!config) return;
-            const payload = { task_id: currentTaskId, [artifact]: config.editor.value };
+            const payload = {
+                task_id: currentTaskId,
+                [editingArtifact]: overlayText.value,
+            };
             try {
                 const response = await fetch(`${API_BASE_URL}/update_artifacts`, {
                     method: 'POST',
@@ -721,11 +845,19 @@
                 });
                 if (!response.ok) throw new Error('Unable to save artifact.');
                 const data = await response.json();
-                updateArtifactsFromTask(data);
-                showMessage('Artifact saved. Approve when ready.');
-                closeEditor(artifact);
+                if (editingArtifact === 'user_flow_diagram') {
+                    renderFlowDiagram(data.user_flow_diagram);
+                } else if (editingArtifact === 'wireframe_html') {
+                    renderWireframe(data.wireframe_html);
+                } else {
+                    artifactDisplays[editingArtifact].textContent =
+                        data[editingArtifact]?.trim() || 'No content yet.';
+                }
+                showMessage('Artifact updated. Approve when ready.');
             } catch (error) {
                 showMessage(error.message, true);
+            } finally {
+                closeOverlay();
             }
         }
 
@@ -809,6 +941,16 @@ ${storedWireframeHtml}
         async function respondToApproval(approved) {
             if (!currentTaskId) return;
             approvalSection.classList.add('hidden');
+            const prevStatus = currentStatus;
+            let optimistic = false;
+            if (approved) {
+                const nextStatus = getNextStage(currentStatus);
+                if (nextStatus !== currentStatus) {
+                    updateCurrentStage(nextStatus);
+                    disableArtifactButtonsForStatus(prevStatus);
+                    optimistic = true;
+                }
+            }
             try {
                 const response = await fetch(`${API_BASE_URL}/respond_to_approval`, {
                     method: 'POST',
@@ -817,7 +959,12 @@ ${storedWireframeHtml}
                 });
                 if (!response.ok) throw new Error('Unable to respond to approval.');
                 const data = await response.json();
-                updateCurrentStage(data.status);
+                if (!optimistic || data.status !== getNextStage(prevStatus)) {
+                    updateCurrentStage(data.status);
+                }
+                if (approved && !optimistic) {
+                    disableArtifactButtonsForStatus(prevStatus);
+                }
                 updateArtifactsFromTask(data);
                 if (["pending_research_approval", "pending_prd_approval", "pending_story_approval", "pending_ux_approval", "pending_approval"].includes(data.status)) {
                     showMessage(`Task ${data.task_id} advanced to ${data.status}. Waiting for the next approval.`);
@@ -835,6 +982,9 @@ ${storedWireframeHtml}
                 }
             } catch (error) {
                 showMessage(error.message, true);
+                if (optimistic) {
+                    updateCurrentStage(prevStatus);
+                }
             }
         }
 
@@ -844,15 +994,13 @@ ${storedWireframeHtml}
         viewFlowBtn.addEventListener('click', openFlowInNewTab);
         viewWireframeBtn.addEventListener('click', openWireframeInNewTab);
         document.querySelectorAll('.edit-btn').forEach(btn => {
-            btn.addEventListener('click', () => openEditor(btn.dataset.artifact));
+            btn.addEventListener('click', () => openOverlay(btn.dataset.artifact));
         });
-        document.querySelectorAll('.save-artifact').forEach(btn => {
-            btn.addEventListener('click', () => saveArtifact(btn.dataset.artifact));
-        });
-        document.querySelectorAll('.cancel-edit').forEach(btn => {
-            btn.addEventListener('click', () => closeEditor(btn.dataset.artifact));
-        });
+        overlayClose.addEventListener('click', closeOverlay);
+        overlayCancel.addEventListener('click', closeOverlay);
+        overlaySave.addEventListener('click', saveOverlay);
 
+        checkPendingApprovalOnLoad();
         renderWorkflow(currentStatus);
         updateCurrentStage(currentStatus);
     </script>

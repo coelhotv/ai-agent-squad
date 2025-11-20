@@ -14,7 +14,7 @@ Navigate to `http://localhost:8000` (served by `index.html`), enter a product id
 2. Saves a new row to `tasks.db` with `status="starting"`.
 3. Triggers the LangGraph workflow with `thread_id=task_id` via `AsyncSqliteSaver`.
 
-The initial task record appears immediately on `tasks_dashboard` (`tasks.html`), which polls `GET /tasks` every five seconds.
+The initial task record appears immediately on `tasks_dashboard` (`tasks.html`), which polls `GET /tasks` every five seconds. The intake page also checks `GET /get_pending_approval` as soon as it loads, so any prior task left waiting is reloaded into the UI and new idea submission is blocked until the human resolves the pending approval.
 
 ### 2. Research Node
 
