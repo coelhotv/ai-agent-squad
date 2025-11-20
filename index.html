@@ -466,6 +466,7 @@
                 <button id="approve-btn">Approve</button>
                 <button id="reject-btn" class="secondary">Reject</button>
             </div>
+            <div id="resubmit-container" class="hidden" style="margin-top:0.75rem;"></div>
         </section>
 
         <section class="artifact-card">
@@ -563,6 +564,7 @@
         const currentAgentLabel = document.getElementById('current-agent-label');
         const workflowFlow = document.getElementById('workflow-flow');
         const refreshQueueBtn = document.getElementById('force-refresh-btn');
+        const resubmitContainer = document.getElementById('resubmit-container');
         const viewFlowBtn = document.getElementById('view-flow-btn');
         const viewWireframeBtn = document.getElementById('view-wireframe-btn');
         const engineeringFileName = document.getElementById('engineering-filename');
@@ -579,6 +581,7 @@
         let pollingIntervalId = null;
         let currentStatus = 'starting';
         let hasPendingTask = false;
+        let lastRejectedStep = null;
         let editingArtifact = null;
         const artifactDisplays = {
             research_summary: document.getElementById('research-content'),
@@ -705,6 +708,30 @@
             responseMessage.className = isError ? 'error' : 'success';
         }
 
+        function renderResubmitBanner(task) {
+            if (task.status === 'rejected' && task.last_rejected_step) {
+                resubmitContainer.classList.remove('hidden');
+                resubmitContainer.innerHTML = `
+                    <div class="error" style="margin-top:1rem;">
+                        Task ${task.task_id} was rejected at step <strong>${task.last_rejected_step}</strong>.
+                        <div style="margin-top:0.5rem; display:flex; gap:0.75rem; flex-wrap:wrap;">
+                            <button id="resubmit-btn">Re-submit ${task.last_rejected_step}</button>
+                            <button id="dismiss-resubmit" class="secondary">Dismiss</button>
+                        </div>
+                    </div>
+                `;
+                document.getElementById('resubmit-btn').addEventListener('click', () => {
+                    resubmitStep(task.task_id, task.last_rejected_step);
+                });
+                document.getElementById('dismiss-resubmit').addEventListener('click', () => {
+                    resubmitContainer.classList.add('hidden');
+                });
+            } else {
+                resubmitContainer.classList.add('hidden');
+                resubmitContainer.innerHTML = '';
+            }
+        }
+
         function setFormEnabled(enabled) {
             ideaForm.querySelectorAll('button').forEach(btn => {
                 if (btn.type === 'submit') btn.disabled = !enabled;
@@ -718,12 +745,17 @@
             approvalSection.classList.remove('hidden');
             approvalContent.textContent = data.pending_approval_content || 'Pending your review.';
             updateArtifactsFromTask(data);
+            lastRejectedStep = data.last_rejected_step || null;
             updateCurrentStage(data.status);
             setFormEnabled(false);
+            renderResubmitBanner(data);
         }
 
         function clearPendingTask() {
             hasPendingTask = false;
+            lastRejectedStep = null;
+            resubmitContainer.innerHTML = '';
+            resubmitContainer.classList.add('hidden');
             setFormEnabled(true);
         }
 
@@ -855,6 +887,24 @@
 
         function renderQaReview(reviewText) {
             qaReview.textContent = reviewText?.trim() || 'No QA review yet.';
+        }
+
+        async function resubmitStep(taskId, step) {
+            try {
+                showMessage('Resubmitting for regeneration…');
+                const response = await fetch(`${API_BASE_URL}/resubmit_step`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ task_id: taskId, step })
+                });
+                if (!response.ok) throw new Error('Resubmit failed');
+                const updated = await response.json();
+                markPendingTask(updated);
+                showMessage(`Task ${taskId} resubmitted for ${step}.`);
+            } catch (err) {
+                console.error(err);
+                showMessage(err.message || 'Resubmit failed', true);
+            }
         }
 
         function openOverlay(artifact) {
@@ -1035,6 +1085,7 @@ ${storedWireframeHtml}
                     showMessage(`Task ${data.task_id} status: ${data.status}.`);
                     currentTaskId = null;
                 }
+                renderResubmitBanner(data);
             } catch (error) {
                 showMessage(error.message, true);
                 if (optimistic) {

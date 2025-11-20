@@ -204,6 +204,9 @@
                     <td>${escapeHtml(task.engineering_file_name || '')}</td>
                     <td><div class="wide-cell"><pre>${escapeHtml(task.engineering_code || '')}</pre></div></td>
                     <td><div class="wide-cell"><pre>${escapeHtml(task.qa_review || '')}</pre></div></td>
+                    <td>${escapeHtml(task.last_rejected_step || '')}</td>
+                    <td>${escapeHtml(task.last_rejected_at || '')}</td>
+                    <td>${renderResubmit(task)}</td>
                     <td>${escapeHtml(task.pending_approval_content || '')}</td>
                 </tr>
             `).join('');
@@ -224,6 +227,9 @@
                                 <th>Engineering File</th>
                                 <th>Engineering Code</th>
                                 <th>QA Review</th>
+                                <th>Last Rejected Step</th>
+                                <th>Last Rejected At</th>
+                                <th>Resubmit</th>
                                 <th>Pending Approval Content</th>
                             </tr>
                         </thead>
@@ -257,6 +263,30 @@
             link.click();
             document.body.removeChild(link);
         });
+
+        function renderResubmit(task) {
+            if (task.status !== 'rejected' || !task.last_rejected_step) {
+                return '';
+            }
+            return `<button onclick="resubmitStep('${task.task_id}','${task.last_rejected_step}')">Re-submit ${task.last_rejected_step}</button>`;
+        }
+
+        async function resubmitStep(taskId, step) {
+            try {
+                refreshStatus.textContent = 'Resubmitting…';
+                const response = await fetch(`${API_BASE_URL}/resubmit_step`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ task_id: taskId, step })
+                });
+                if (!response.ok) throw new Error('Resubmit failed');
+                await fetchTasks();
+                refreshStatus.textContent = 'Resubmitted and refreshed.';
+            } catch (err) {
+                console.error(err);
+                refreshStatus.textContent = err.message;
+            }
+        }
     </script>
 </body>
 </html>

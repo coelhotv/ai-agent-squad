@@ -62,6 +62,8 @@ class Task(Base):
     engineering_file_name = Column(Text, nullable=True)
     engineering_code = Column(Text, nullable=True)
     qa_review = Column(Text, nullable=True)
+    last_rejected_step = Column(Text, nullable=True)
+    last_rejected_at = Column(String, nullable=True)
 
 Base.metadata.create_all(bind=engine)
 
@@ -81,6 +83,8 @@ for col_name in (
     "engineering_file_name",
     "engineering_code",
     "qa_review",
+    "last_rejected_step",
+    "last_rejected_at",
 ):
     ensure_column(col_name)
 
@@ -105,6 +109,7 @@ class AgentState(TypedDict):
     engineering_file_name: Optional[str]
     engineering_code: Optional[str]
     qa_review: Optional[str]
+    last_rejected_step: Optional[str]
 
 # Keep the async connection open for the lifetime of the app and close on shutdown.
 _checkpointer_stack = AsyncExitStack()
@@ -597,7 +602,7 @@ def generate_user_flow_diagram(product_idea: str, user_stories: str | None) -> s
         "required": ["title", "nodes_list", "mermaid_syntax"]
     }    
     system_prompt = (
-        "You are an expert UX Architect. Your goal is to create a clear, logical Mermaid user flow diagram "
+        "You are an expert UX Architect. Your goal is to create a clear, logical MermaidJS user flow diagram "
         "based on the provided product idea, its estabished user stories and acceptance criterias. "
         "You MUST output a JSON object that adheres strictly to the provided schema."
     )
@@ -613,7 +618,7 @@ def generate_user_flow_diagram(product_idea: str, user_stories: str | None) -> s
          - Use standard rectangular nodes `[ ]` for User Actions (e.g., `A[User clicks Login]`).
          - If needed, use diamond nodes `{{ }}` for System Decisions or logic checks (e.g., `B{{ Is Valid? }}`).
          - Ensure the flow has a clear Start and End that commits to the core product idea.
-         3. **Mermaid Syntax Rules:**
+         3. **MermaidJS Syntax Rules:**
          - Use simple, alphanumeric IDs for nodes (e.g., `Step1`, `Step2`). Do NOT use spaces in IDs.
          - Put the descriptive text inside the brackets/parentheses.
          - Example: `Start[User Opens App] --> Check{{ Logged In? }}`.
@@ -734,11 +739,14 @@ def generate_engineering_prototype(
         "2) Return raw JSON only (no Markdown) with keys: file_name, code.\n"
         "3) code must be a complete runnable script with logging enabled.\n"
         "4) Do NOT generate HTML/CSS; derive routes and models from the provided stories/flow/wireframe.\n"
-        "5) Use built-in generics (list[str]) and `| None`; do NOT import typing.List or typing.Optional.\n"
-        "6) Include a health/status endpoint, CORS setup, and minimal in-memory storage if data is required.\n"
-        "7) Guard uvicorn launch with if __name__ == '__main__':\n"
-        "8) Avoid auth/session layers unless explicitly required by the PRD/stories.\n"
-        "8) Keep comments minimal and only when clarifying non-obvious logic.\n"
+        "5) Route definitions must include every path parameter in the decorator (e.g., `/goals/{user_id}`) to avoid validation errors.\n"
+        "6) Use built-in generics (list[str]) and `| None`; do NOT import typing.List or typing.Optional.\n"
+        "7) Model validation should enforce business rules (e.g., count must be > 0) using Field validators.\n"
+        "8) Include full CRUD for goals (set/get/update/delete) plus error handling for conflicts/missing IDs.\n"
+        "9) Include a health/status endpoint, CORSMiddleware, and mention that in-memory storage is for demo only (not production-safe).\n"
+        "10) Guard uvicorn launch with if __name__ == '__main__'.\n"
+        "11) Avoid auth/session layers unless explicitly required by the PRD/stories.\n"
+        "12) Keep comments minimal and only when clarifying non-obvious logic.\n"
     )
     user_prompt = f"""
     Product idea: {product_idea}
@@ -752,8 +760,11 @@ def generate_engineering_prototype(
     Wireframe structure (HTML/Tailwind for reference on fields):
     {wireframe_html or 'Unavailable.'}
 
-    Derive endpoint names, payloads, and models from the stories/flow/wireframe. Prefer simple CRUD-style routes,
-    JSON responses, and basic validation. Include error handling (404/400) and logging.
+    Derive endpoint names, payloads, and models from the stories/flow/wireframe. Ensure:
+    - Goals have full CRUD (create/set, retrieve, update, delete) and a consistent goal ID scheme.
+    - Use JSON responses, basic validation, and logging. Validate the smoking episode count (>0) and reject invalid goal IDs.
+    - Provide error handling for duplicates/missing goals, missing users, and any invalid payloads (HTTP 400/404).
+    - Keep the behavior deterministic so QA can re-run your code and see the same routes.
     """
     parsed = call_ollama_json(
         system_prompt, user_prompt, engineering_schema, reasoning=False
@@ -833,7 +844,9 @@ def run_qa_review(
     system_prompt = (
         "You are a Senior QA Engineer reviewing a FastAPI prototype. "
         "Output JSON only, matching the provided schema. Focus on correctness versus the PRD/user stories: "
-        "routes, payloads, validation, error handling, logging, and any security/cors concerns. "
+        "routes, payloads, validation, goal CRUD coverage, error handling, logging, and any security/cors concerns. "
+        "Verify that each declared path parameter appears in the route decorator and that smoking episode validation prevents non-positive counts. "
+        "Check that goal endpoints provide create/read/update/delete flows with conflict/missing-key errors and mention the demo-only in-memory storage when evaluating resilience."
         "Be concise and actionable."
     )
     user_prompt = f"""
@@ -1097,6 +1110,8 @@ class TaskStatus(BaseModel):
     engineering_file_name: Optional[str] = None
     engineering_code: Optional[str] = None
     qa_review: Optional[str] = None
+    last_rejected_step: Optional[str] = None
+    last_rejected_at: Optional[str] = None
     class Config:
         from_attributes = True
 
@@ -1116,6 +1131,11 @@ class RespondToApprovalRequest(BaseModel):
     task_id: str
     approved: bool
     overrides: ArtifactUpdate | None = None
+
+
+class ResubmitRequest(BaseModel):
+    task_id: str
+    step: str  # e.g., research, product_prd, product_stories, ux_design, engineering, qa_review
 
 
 PENDING_STATUSES = {
@@ -1157,6 +1177,99 @@ def apply_artifact_overrides(task_id: str, overrides: ArtifactUpdate, db: Sessio
         db.commit()
         db.refresh(db_task)
     return db_task
+
+
+STEP_STATUS_MAP = {
+    "research": "pending_research_approval",
+    "product_prd": "pending_prd_approval",
+    "product_stories": "pending_story_approval",
+    "ux_design": "pending_ux_approval",
+    "engineering": "pending_engineering_approval",
+    "qa_review": "pending_qa_approval",
+}
+
+
+def clear_artifacts_for_step(db_task: Task, step: str):
+    """Drop artifacts at and after the specified step so regeneration is clean."""
+    downstream_fields = {
+        "research": [
+            "research_summary",
+            "prd_summary",
+            "user_stories",
+            "user_flow_diagram",
+            "wireframe_html",
+            "engineering_file_name",
+            "engineering_code",
+            "qa_review",
+        ],
+        "product_prd": [
+            "prd_summary",
+            "user_stories",
+            "user_flow_diagram",
+            "wireframe_html",
+            "engineering_file_name",
+            "engineering_code",
+            "qa_review",
+        ],
+        "product_stories": [
+            "user_stories",
+            "user_flow_diagram",
+            "wireframe_html",
+            "engineering_file_name",
+            "engineering_code",
+            "qa_review",
+        ],
+        "ux_design": [
+            "user_flow_diagram",
+            "wireframe_html",
+            "engineering_file_name",
+            "engineering_code",
+            "qa_review",
+        ],
+        "engineering": [
+            "engineering_file_name",
+            "engineering_code",
+            "qa_review",
+        ],
+        "qa_review": [
+            "qa_review",
+        ],
+    }
+    fields = downstream_fields.get(step, [])
+    for field in fields:
+        setattr(db_task, field, None)
+
+
+def status_to_step(status: str | None) -> Optional[str]:
+    if not status:
+        return None
+    inverse = {
+        "pending_research_approval": "research",
+        "pending_prd_approval": "product_prd",
+        "pending_story_approval": "product_stories",
+        "pending_ux_approval": "ux_design",
+        "pending_engineering_approval": "engineering",
+        "pending_qa_approval": "qa_review",
+    }
+    return inverse.get(status)
+
+
+def build_state_from_task(db_task: Task) -> AgentState:
+    return {
+        "task_id": db_task.task_id,
+        "product_idea": db_task.product_idea,
+        "status": db_task.status,
+        "pending_approval_content": db_task.pending_approval_content,
+        "research_summary": db_task.research_summary,
+        "prd_summary": db_task.prd_summary,
+        "user_stories": db_task.user_stories,
+        "user_flow_diagram": db_task.user_flow_diagram,
+        "wireframe_html": db_task.wireframe_html,
+        "engineering_file_name": db_task.engineering_file_name,
+        "engineering_code": db_task.engineering_code,
+        "qa_review": db_task.qa_review,
+        "last_rejected_step": db_task.last_rejected_step,
+    }
 
 # --- API Endpoints (Refactored) ---
 @app.post("/start_task", response_model=TaskStatus)
@@ -1264,6 +1377,8 @@ def export_tasks(db: Session = Depends(get_db)):
             "Engineering File Name",
             "Engineering Code",
             "QA Review",
+            "Last Rejected Step",
+            "Last Rejected At",
             "Pending Approval Content",
         ]
     )
@@ -1281,6 +1396,8 @@ def export_tasks(db: Session = Depends(get_db)):
                 task.engineering_file_name or "",
                 task.engineering_code or "",
                 task.qa_review or "",
+                task.last_rejected_step or "",
+                task.last_rejected_at or "",
                 task.pending_approval_content or "",
             ]
         )
@@ -1307,10 +1424,13 @@ async def respond_to_approval(request: RespondToApprovalRequest, db: Session = D
         raise HTTPException(status_code=404, detail="Task not found or not pending approval.")
 
     if not request.approved:
+        rejected_step = status_to_step(db_task.status)
         db_task.status = 'rejected'
+        db_task.last_rejected_step = rejected_step
+        db_task.last_rejected_at = time.strftime("%Y-%m-%d %H:%M:%S")
         db_task.pending_approval_content = None
         db.commit()
-        logger.info(f"Task {request.task_id} rejected by human.")
+        logger.info(f"Task {request.task_id} rejected at step {db_task.last_rejected_step}.")
         return TaskStatus.from_orm(db_task)
 
     resolved_status = get_next_status(current_status=request.overrides.get('status') if request.overrides else None)
@@ -1344,6 +1464,56 @@ async def respond_to_approval(request: RespondToApprovalRequest, db: Session = D
     db.commit()
     logger.info(f"Task {request.task_id} updated in DB to final status '{db_task.status}'.")
     
+    return TaskStatus.from_orm(db_task)
+
+
+@app.post("/resubmit_step", response_model=TaskStatus)
+async def resubmit_step(request: ResubmitRequest, db: Session = Depends(get_db)):
+    allowed_steps = set(STEP_STATUS_MAP.keys())
+    if request.step not in allowed_steps:
+        raise HTTPException(status_code=400, detail="Invalid step for resubmission.")
+
+    db_task = db.query(Task).filter(Task.task_id == request.task_id).first()
+    if not db_task:
+        raise HTTPException(status_code=404, detail="Task not found.")
+    if db_task.status != "rejected":
+        raise HTTPException(status_code=400, detail="Task is not rejected.")
+    if db_task.last_rejected_step != request.step:
+        raise HTTPException(status_code=400, detail="Resubmit step does not match last rejection.")
+
+    clear_artifacts_for_step(db_task, request.step)
+    state = build_state_from_task(db_task)
+    state["status"] = STEP_STATUS_MAP[request.step]
+    state["pending_approval_content"] = None
+
+    step_fn_map = {
+        "research": research_node,
+        "product_prd": product_prd_node,
+        "product_stories": product_stories_node,
+        "ux_design": ux_design_node,
+        "engineering": engineering_node,
+        "qa_review": qa_review_node,
+    }
+    step_fn = step_fn_map.get(request.step)
+    if not step_fn:
+        raise HTTPException(status_code=400, detail="Unsupported step.")
+
+    updated_state = step_fn(state)
+    db_task.status = updated_state.get("status", db_task.status)
+    db_task.pending_approval_content = updated_state.get("pending_approval_content")
+    db_task.research_summary = updated_state.get("research_summary")
+    db_task.prd_summary = updated_state.get("prd_summary")
+    db_task.user_stories = updated_state.get("user_stories")
+    db_task.user_flow_diagram = updated_state.get("user_flow_diagram")
+    db_task.wireframe_html = updated_state.get("wireframe_html")
+    db_task.engineering_file_name = updated_state.get("engineering_file_name")
+    db_task.engineering_code = updated_state.get("engineering_code")
+    db_task.qa_review = updated_state.get("qa_review")
+    db_task.last_rejected_step = None
+    db_task.last_rejected_at = None
+    db.commit()
+    db.refresh(db_task)
+    logger.info("Task %s resubmitted for step %s", request.task_id, request.step)
     return TaskStatus.from_orm(db_task)
 
 # --- Static File and Status Endpoints ---
