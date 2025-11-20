@@ -603,7 +603,8 @@ def generate_user_flow_diagram(product_idea: str, user_stories: str | None) -> s
     }    
     system_prompt = (
         "You are an expert UX Architect. Your goal is to create a clear, logical MermaidJS user flow diagram "
-        "based on the provided product idea, its estabished user stories and acceptance criterias. "
+        "based on the provided product idea, its estabished **user stories and acceptance criterias**. "
+        "For this first release, you can skip the login/registration flow."
         "You MUST output a JSON object that adheres strictly to the provided schema."
     )
     user_prompt = f"""
@@ -672,7 +673,8 @@ def generate_wireframe_html(product_idea: str, user_stories: str | None, flow_di
 
         ### DESIGN RULES:
         ## **Aesthetic:** Stick to a low-fidelity wireframe design. 
-        - Use 'grayscale' style when possible.
+        - Use 'grayscale' style when possible, but **be mindful of 'dark' mode** on selected systems setups.
+        - Guarantee high contrast for readability (e.g., `bg-slate-900`, `text-slate-100`).
         - Use borders (`border`, `border-gray-300`) to define areas.
 
         ##. **Images:** Do NOT use <img> tags requiring external URLs.
@@ -719,7 +721,6 @@ def fallback_wireframe_html(product_idea: str) -> str:
 
 def generate_engineering_prototype(
     product_idea: str,
-    prd_summary: str | None,
     user_stories: str | None,
     user_flow_diagram: str | None,
     wireframe_html: str | None,
@@ -739,18 +740,18 @@ def generate_engineering_prototype(
         "2) Return raw JSON only (no Markdown) with keys: file_name, code.\n"
         "3) code must be a complete runnable script with logging enabled.\n"
         "4) Do NOT generate HTML/CSS; derive routes and models from the provided stories/flow/wireframe.\n"
-        "5) Route definitions must include every path parameter in the decorator (e.g., `/goals/{user_id}`) to avoid validation errors.\n"
+        "5) Route definitions must include every path parameter in the decorator to avoid validation errors.\n"
         "6) Use built-in generics (list[str]) and `| None`; do NOT import typing.List or typing.Optional.\n"
-        "7) Model validation should enforce business rules (e.g., count must be > 0) using Field validators.\n"
-        "8) Include full CRUD for goals (set/get/update/delete) plus error handling for conflicts/missing IDs.\n"
-        "9) Include a health/status endpoint, CORSMiddleware, and mention that in-memory storage is for demo only (not production-safe).\n"
+        "7) Add validation with Field/annotated types to enforce obvious business rules from the stories/PRD (positive quantities, required fields, allowed enums).\n"
+        "8) Implement the REST surface implied by the stories/PRD (create/read/update/delete where applicable) and include conflict/missing-resource handling.\n"
+        "9) Include a health/status endpoint, CORSMiddleware (default to a restrained list like ['http://localhost:8000']), and note that any in-memory storage is for demo only.\n"
         "10) Guard uvicorn launch with if __name__ == '__main__'.\n"
         "11) Avoid auth/session layers unless explicitly required by the PRD/stories.\n"
         "12) Keep comments minimal and only when clarifying non-obvious logic.\n"
-    )
+        )
     user_prompt = f"""
     Product idea: {product_idea}
-    PRD (context): {prd_summary or 'Unavailable.'}
+
     User stories + AC:
     {user_stories or 'Unavailable.'}
 
@@ -761,10 +762,10 @@ def generate_engineering_prototype(
     {wireframe_html or 'Unavailable.'}
 
     Derive endpoint names, payloads, and models from the stories/flow/wireframe. Ensure:
-    - Goals have full CRUD (create/set, retrieve, update, delete) and a consistent goal ID scheme.
-    - Use JSON responses, basic validation, and logging. Validate the smoking episode count (>0) and reject invalid goal IDs.
-    - Provide error handling for duplicates/missing goals, missing users, and any invalid payloads (HTTP 400/404).
-    - Keep the behavior deterministic so QA can re-run your code and see the same routes.
+    - Provide the CRUD/read routes implied by the stories/PRD (e.g., listing resources, create/update/delete items) with consistent IDs and conflict checks.
+    - Use JSON responses, validation, and logging. Enforce obvious constraints (positive numeric fields, allowed enum values, required fields) from the context.
+    - Provide error handling for duplicates/missing resources and any invalid payloads (HTTP 400/404).
+    - Keep the behavior deterministic so QA can re-run your code and see the same routes and validations.
     """
     parsed = call_ollama_json(
         system_prompt, user_prompt, engineering_schema, reasoning=False
@@ -817,7 +818,6 @@ def generate_engineering_prototype(
 
 def run_qa_review(
     product_idea: str,
-    prd_summary: str | None,
     user_stories: str | None,
     engineering_code: str | None,
 ) -> str:
@@ -843,15 +843,16 @@ def run_qa_review(
     }
     system_prompt = (
         "You are a Senior QA Engineer reviewing a FastAPI prototype. "
-        "Output JSON only, matching the provided schema. Focus on correctness versus the PRD/user stories: "
-        "routes, payloads, validation, goal CRUD coverage, error handling, logging, and any security/cors concerns. "
-        "Verify that each declared path parameter appears in the route decorator and that smoking episode validation prevents non-positive counts. "
-        "Check that goal endpoints provide create/read/update/delete flows with conflict/missing-key errors and mention the demo-only in-memory storage when evaluating resilience."
+        "Output JSON only, matching the provided schema. Focus on correctness versus the idea/user stories: "
+        "routes, payloads, validation, error handling, logging, and any security/cors concerns. "
+        "Verify that each declared path parameter appears in the route decorator; CRUD surfaces implied by the stories/PRD are present; "
+        "data validation enforces obvious rules (positive numbers, required fields, allowed enums). "
+        "Check for conflict/missing-resource handling, reasonable CORS defaults, and note the risks of demo-only in-memory storage. "
         "Be concise and actionable."
     )
     user_prompt = f"""
     Product idea: {product_idea}
-    PRD: {prd_summary or 'Unavailable.'}
+
     User stories: {user_stories or 'Unavailable.'}
 
     Prototype code to review:
@@ -994,7 +995,6 @@ def engineering_node(state: AgentState):
     logger.info(f"--- Node: engineering_node (Task ID: {state['task_id']}) ---")
     file_name, code = generate_engineering_prototype(
         state['product_idea'],
-        state.get('prd_summary'),
         state.get('user_stories'),
         state.get('user_flow_diagram'),
         state.get('wireframe_html'),
@@ -1012,7 +1012,6 @@ def qa_review_node(state: AgentState):
     logger.info(f"--- Node: qa_review_node (Task ID: {state['task_id']}) ---")
     state['qa_review'] = run_qa_review(
         state['product_idea'],
-        state.get('prd_summary'),
         state.get('user_stories'),
         state.get('engineering_code'),
     )

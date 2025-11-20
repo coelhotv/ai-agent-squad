@@ -462,7 +462,7 @@
 
         <section id="approval-section" class="approval-card hidden">
             <p id="approval-content"></p>
-            <div style="display:flex; gap:0.75rem; flex-wrap:wrap;">
+            <div id="approval-actions" style="display:flex; gap:0.75rem; flex-wrap:wrap;">
                 <button id="approve-btn">Approve</button>
                 <button id="reject-btn" class="secondary">Reject</button>
             </div>
@@ -565,6 +565,7 @@
         const workflowFlow = document.getElementById('workflow-flow');
         const refreshQueueBtn = document.getElementById('force-refresh-btn');
         const resubmitContainer = document.getElementById('resubmit-container');
+        const approvalActions = document.getElementById('approval-actions');
         const viewFlowBtn = document.getElementById('view-flow-btn');
         const viewWireframeBtn = document.getElementById('view-wireframe-btn');
         const engineeringFileName = document.getElementById('engineering-filename');
@@ -708,25 +709,28 @@
             responseMessage.className = isError ? 'error' : 'success';
         }
 
+        function toggleApprovalActions(show) {
+            approvalActions.style.display = show ? 'flex' : 'none';
+        }
+
         function renderResubmitBanner(task) {
             if (task.status === 'rejected' && task.last_rejected_step) {
+                toggleApprovalActions(false);
+                approvalSection.classList.remove('hidden');
                 resubmitContainer.classList.remove('hidden');
                 resubmitContainer.innerHTML = `
                     <div class="error" style="margin-top:1rem;">
                         Task ${task.task_id} was rejected at step <strong>${task.last_rejected_step}</strong>.
                         <div style="margin-top:0.5rem; display:flex; gap:0.75rem; flex-wrap:wrap;">
                             <button id="resubmit-btn">Re-submit ${task.last_rejected_step}</button>
-                            <button id="dismiss-resubmit" class="secondary">Dismiss</button>
                         </div>
                     </div>
                 `;
                 document.getElementById('resubmit-btn').addEventListener('click', () => {
                     resubmitStep(task.task_id, task.last_rejected_step);
                 });
-                document.getElementById('dismiss-resubmit').addEventListener('click', () => {
-                    resubmitContainer.classList.add('hidden');
-                });
             } else {
+                toggleApprovalActions(true);
                 resubmitContainer.classList.add('hidden');
                 resubmitContainer.innerHTML = '';
             }
