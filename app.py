@@ -62,6 +62,8 @@ class Task(Base):
     engineering_file_name = Column(Text, nullable=True)
     engineering_code = Column(Text, nullable=True)
     qa_review = Column(Text, nullable=True)
+    engineering_spec = Column(Text, nullable=True)
+    engineering_qa = Column(Text, nullable=True)
     last_rejected_step = Column(Text, nullable=True)
     last_rejected_at = Column(String, nullable=True)
 
@@ -83,6 +85,8 @@ for col_name in (
     "engineering_file_name",
     "engineering_code",
     "qa_review",
+    "engineering_spec",
+    "engineering_qa",
     "last_rejected_step",
     "last_rejected_at",
 ):
@@ -109,6 +113,8 @@ class AgentState(TypedDict):
     engineering_file_name: Optional[str]
     engineering_code: Optional[str]
     qa_review: Optional[str]
+    engineering_spec: Optional[str]
+    engineering_qa: Optional[str]
     last_rejected_step: Optional[str]
 
 # Keep the async connection open for the lifetime of the app and close on shutdown.
@@ -221,11 +227,11 @@ def query_perplexity(product_idea: str) -> Optional[str]:
     }
     system_prompt = (
         "You are a senior market research analyst. Analyze the idea, compare competitors,"
-        " and highlight opportunities, risks, and references."
+        " and highlight opportunities, risks, and references. Output strictly using the provided JSON schema."
+        " Keep it concise and structured."
     )
     user_prompt = (
         f"Idea: {product_idea}. Provide insights for PM/UX planning."
-        " Identify a primary target audience. Keep it concise and structured."
         " Max 2-3 paragraphs for summary, 2-3 bullets each for opportunities and risks."
         " Use credible sources and list main URLs used as references (3-5 max)."
     )
@@ -398,6 +404,7 @@ def generate_prd_document(product_idea: str, research_summary: str | None) -> st
     prd_schema = {
         "type": "object",
         "properties": {
+            "app_name": {"type": "string"},
             "executive_summary": {"type": "string"},
             "market_opportunity": {
                 "type": "array",
@@ -417,6 +424,7 @@ def generate_prd_document(product_idea: str, research_summary: str | None) -> st
             }
         },
         "required": [
+            "app_name",
             "executive_summary",
             "market_opportunity",
             "customer_needs",
@@ -441,6 +449,7 @@ def generate_prd_document(product_idea: str, research_summary: str | None) -> st
             "schema": {
                 "type": "object",
                 "properties": {
+                    "app_name": {"type": "string"},
                     "executive_summary": {"type": "string"},
                     "market_opportunity": {"type": "array", "items": {"type": "string"}},
                     "customer_needs": {"type": "array", "items": {"type": "string"}},
@@ -448,6 +457,7 @@ def generate_prd_document(product_idea: str, research_summary: str | None) -> st
                     "success_criteria": {"type": "array", "items": {"type": "string"}},
                 },
                 "required": [
+                    "app_name",
                     "executive_summary",
                     "market_opportunity",
                     "customer_needs",
@@ -460,7 +470,9 @@ def generate_prd_document(product_idea: str, research_summary: str | None) -> st
     if not parsed:
         return fallback_prd(product_idea, research_summary)
 
-    lines = ["Executive Summary:", parsed.get("executive_summary", "")]
+    lines = ["App:", parsed.get("app_name", "")]
+    lines.append("\nExecutive Summary:")
+    lines.append(parsed.get("executive_summary", ""))
     lines.append("\nMarket Opportunity & Positioning:")
     for item in parsed.get("market_opportunity", [])[:3]:
         lines.append(f"- {item}")
@@ -604,7 +616,7 @@ def generate_user_flow_diagram(product_idea: str, user_stories: str | None) -> s
     system_prompt = (
         "You are an expert UX Architect. Your goal is to create a clear, logical MermaidJS user flow diagram "
         "based on the provided product idea, its estabished **user stories and acceptance criterias**. "
-        "For this first release, you can skip the login/registration flow."
+        "For this MVP release, you can skip the login/registration flow."
         "You MUST output a JSON object that adheres strictly to the provided schema."
     )
     user_prompt = f"""
@@ -719,106 +731,149 @@ def fallback_wireframe_html(product_idea: str) -> str:
     )
 
 
-def generate_engineering_prototype(
+def generate_engineering_spec(
     product_idea: str,
     user_stories: str | None,
     user_flow_diagram: str | None,
-    wireframe_html: str | None,
-) -> tuple[str, str]:
-    engineering_schema = {
+) -> str:
+    spec_schema = {
         "type": "object",
         "properties": {
-            "file_name": {"type": "string"},
-            "code": {"type": "string"},
+            "overview": {
+            "type": "string",
+            "description": "A brief high-level summary of the architecture choice."
+            },
+            "database_models": {
+            "type": "array",
+            "description": "List of Pydantic models representing the data.",
+            "items": {
+                "type": "object",
+                "properties": {
+                "name": { "type": "string", "description": "Class name, e.g., 'User'" },
+                "fields": {
+                    "type": "array",
+                    "items": {
+                    "type": "object",
+                    "properties": {
+                        "name": { "type": "string" },
+                        "type": { "type": "string", "description": "Python type, e.g., 'str', 'int', 'datetime'" },
+                        "constraints": { "type": "string", "description": "e.g., 'gt=0', 'optional', 'unique'" }
+                    },
+                    "required": ["name", "type"]
+                    }
+                }
+                },
+                "required": ["name", "fields"]
+            }
+            },
+            "api_endpoints": {
+            "type": "array",
+            "description": "List of API routes to implement.",
+            "items": {
+                "type": "object",
+                "properties": {
+                "method": {
+                    "type": "string",
+                    "enum": ["GET", "POST", "PUT", "DELETE", "PATCH"],
+                    "description": "HTTP Method"
+                },
+                "path": { "type": "string", "description": "URL path, e.g., '/users/{id}'" },
+                "summary": { "type": "string", "description": "What this endpoint does." },
+                "request_body_model": {
+                    "type": ["string", "null"],
+                    "description": "The Pydantic model name used for the input body. NULL if GET/DELETE."
+                },
+                "response_model": {
+                    "type": "string",
+                    "description": "The Pydantic model name returned."
+                }
+                },
+                "required": ["method", "path", "summary", "response_model"]
+            }
+            }
         },
-        "required": ["file_name", "code"],
+        "required": ["database_models", "api_endpoints"]
     }
-    system_prompt = (
-        "You are a Senior Python Engineer. Your goal is to write a single-file FastAPI prototype.\n"
-        "RULES:\n"
-        "1) Use FastAPI, Pydantic v2 (`from pydantic import BaseModel`), and uvicorn.\n"
-        "2) Return raw JSON only (no Markdown) with keys: file_name, code.\n"
-        "3) code must be a complete runnable script with logging enabled.\n"
-        "4) Do NOT generate HTML/CSS; derive routes and models from the provided stories/flow/wireframe.\n"
-        "5) Route definitions must include every path parameter in the decorator to avoid validation errors.\n"
-        "6) Use built-in generics (list[str]) and `| None`; do NOT import typing.List or typing.Optional.\n"
-        "7) Add validation with Field/annotated types to enforce obvious business rules from the stories/PRD (positive quantities, required fields, allowed enums).\n"
-        "8) Implement the REST surface implied by the stories/PRD (create/read/update/delete where applicable) and include conflict/missing-resource handling.\n"
-        "9) Include a health/status endpoint, CORSMiddleware (default to a restrained list like ['http://localhost:8000']), and note that any in-memory storage is for demo only.\n"
-        "10) Guard uvicorn launch with if __name__ == '__main__'.\n"
-        "11) Avoid auth/session layers unless explicitly required by the PRD/stories.\n"
-        "12) Keep comments minimal and only when clarifying non-obvious logic.\n"
-        )
+    system_prompt = """"
+        You are a Senior Software Architect specializing in FastAPI and Pydantic v2.
+        Your goal is to design a robust backend API structure based on User Stories/AC and Mermaid flow.
+
+        CRITICAL DESIGN RULES:
+        1. **Coverage:** You must design schema and endpoints to cover the first (1) User Story/AC + flow rovided.
+        2. **HTTP Semantics:** For any creation or update (POST/PUT), you MUST specify a `request_body_model`. Do NOT design APIs that use Query parameters for inserting data.
+        3. **Data Integrity:** Define strict constraints for your models (e.g., positive numbers for counts, required fields).
+        4. **Separation:** Create distinct models for Requests (Input) and Responses (Output) if necessary to hide internal IDs or computed fields.
+        5. **Conflict Handling:** Ensure paths include all parameters and plan conflict/missing-resource handling.
+        
+        **Do NOT write implementation logic — only the interface.**
+    """
     user_prompt = f"""
     Product idea: {product_idea}
-
-    User stories + AC:
+    
+    User stories and AC:
     {user_stories or 'Unavailable.'}
 
-    User flow (Mermaid):
+    User flow (Mermaid) for context:
     {user_flow_diagram or 'Unavailable.'}
 
-    Wireframe structure (HTML/Tailwind for reference on fields):
-    {wireframe_html or 'Unavailable.'}
-
-    Derive endpoint names, payloads, and models from the stories/flow/wireframe. Ensure:
-    - Provide the CRUD/read routes implied by the stories/PRD (e.g., listing resources, create/update/delete items) with consistent IDs and conflict checks.
-    - Use JSON responses, validation, and logging. Enforce obvious constraints (positive numeric fields, allowed enum values, required fields) from the context.
-    - Provide error handling for duplicates/missing resources and any invalid payloads (HTTP 400/404).
-    - Keep the behavior deterministic so QA can re-run your code and see the same routes and validations.
+    Now, design the database models and API endpoints needed.
     """
-    parsed = call_ollama_json(
-        system_prompt, user_prompt, engineering_schema, reasoning=False
-    )
-    if parsed and parsed.get("file_name") and parsed.get("code"):
-        return parsed["file_name"], parsed["code"]
-
-    fallback_code = (
-        "import logging\n"
-        "from fastapi import FastAPI, HTTPException\n"
-        "from fastapi.middleware.cors import CORSMiddleware\n"
-        "from pydantic import BaseModel\n"
-        "from typing import Dict\n\n"
-        "logging.basicConfig(level=logging.INFO)\n"
-        "logger = logging.getLogger(__name__)\n\n"
-        "app = FastAPI(title=\"Prototype\", version=\"0.1.0\")\n"
-        "app.add_middleware(\n"
-        "    CORSMiddleware,\n"
-        "    allow_origins=[\"*\"],\n"
-        "    allow_credentials=True,\n"
-        "    allow_methods=[\"*\"],\n"
-        "    allow_headers=[\"*\"],\n"
-        ")\n\n"
-        "class Item(BaseModel):\n"
-        "    name: str\n"
-        "    description: str | None = None\n\n"
-        "store: Dict[str, Item] = {}\n\n"
-        "@app.get(\"/health\")\n"
-        "def health():\n"
-        "    return {\"status\": \"ok\"}\n\n"
-        "@app.post(\"/items\")\n"
-        "def create_item(item: Item):\n"
-        "    if item.name in store:\n"
-        "        raise HTTPException(status_code=400, detail=\"Item exists\")\n"
-        "    store[item.name] = item\n"
-        "    logger.info(\"Created item %s\", item.name)\n"
-        "    return item\n\n"
-        "@app.get(\"/items/{name}\")\n"
-        "def read_item(name: str):\n"
-        "    item = store.get(name)\n"
-        "    if not item:\n"
-        "        raise HTTPException(status_code=404, detail=\"Not found\")\n"
-        "    return item\n\n"
-        "if __name__ == \"__main__\":\n"
-        "    import uvicorn\n"
-        "    uvicorn.run(app, host=\"0.0.0.0\", port=8000)\n"
-    )
-    return "main.py", fallback_code
+    parsed = call_ollama_json(system_prompt, user_prompt, spec_schema)
+    if parsed and parsed.get("database_models") and parsed.get("api_endpoints"):
+        return json.dumps(parsed, indent=2)
+    return "Spec unavailable"
 
 
-def run_qa_review(
+def generate_engineering_code_from_spec(
     product_idea: str,
     user_stories: str | None,
+    spec_text: str | None,
+) -> tuple[str, str]:
+    code_schema = {
+        "type": "object",
+        "properties": {
+            "filename": { "type": "string" },
+            "code": { "type": "string", "description": "Complete, runnable Python code." }
+    },
+    "required": ["filename", "code"]
+    }
+    system_prompt = """
+        You are an Expert Python Developer.
+        Your task is to generate a single-file FastAPI application that implements the provided Architecture Plan EXACTLY.
+
+        IMPLEMENTATION RULES:
+        1. **Strict Adherence:** Implement every model and endpoint defined in the Architecture Plan. Do not skip any.
+        2. **Pydantic V2:** Use `model_validator` or `field_validator` for constraints. Use `BaseModel`.
+        3. **FastAPI Best Practices:**
+        - Use `CORSMiddleware` allowing ["*"] (restrain origins e.g., ['http://localhost:8000']).
+        - Use `logging` to track request activity in handlers, health/status endpoint, and note in-memory storage is for demo only..
+        - Ensure `if __name__ == "__main__":` block is present.
+        4. Use JSON bodies for POST/PUT/PATCH. Align path params in decorators and signatures.
+        5. **No Hallucinations:** Do not add features not requested in the plan.
+        6. Return only JSON as specified in the schema, with file_name + code only (no Markdown).
+        
+    """
+    user_prompt = f"""
+    Product idea: {product_idea}
+    
+    User stories (for context only, spec is authoritative):
+    {user_stories or 'Unavailable.'}
+
+    Architecture Spec (implement exactly these models and endpoints):
+    {spec_text or 'Unavailable.'}
+
+    Now write the code!
+    """
+    parsed = call_ollama_json(system_prompt, user_prompt, code_schema)
+    if parsed and parsed.get("file_name") and parsed.get("code"):
+        return parsed["file_name"], parsed["code"]
+    return "main.py", "Code unavailable."
+
+
+def run_engineering_qa_review(
+    product_idea: str,
+    user_stories: str | None,
+    spec_text: str | None,
     engineering_code: str | None,
 ) -> str:
     qa_schema = {
@@ -842,30 +897,23 @@ def run_qa_review(
         "required": ["verdict", "findings"],
     }
     system_prompt = (
-        "You are a Senior QA Engineer reviewing a FastAPI prototype. "
-        "Output JSON only, matching the provided schema. Focus on correctness versus the idea/user stories: "
-        "routes, payloads, validation, error handling, logging, and any security/cors concerns. "
-        "Verify that each declared path parameter appears in the route decorator; CRUD surfaces implied by the stories/PRD are present; "
-        "data validation enforces obvious rules (positive numbers, required fields, allowed enums). "
-        "Check for conflict/missing-resource handling, reasonable CORS defaults, and note the risks of demo-only in-memory storage. "
+        "You are a Senior QA Engineer reviewing a FastAPI prototype against the provided spec and user stories. "
+        "Output JSON only. Focus on: schema/endpoint alignment with the spec, validation (field_validator, positive numbers, enums), "
+        "conflict/missing-resource handling, logging usage, CORS configuration, and noting demo-only storage risks. "
+        "Coverage of at least the first user story is required. "
         "Be concise and actionable."
     )
     user_prompt = f"""
     Product idea: {product_idea}
-
     User stories: {user_stories or 'Unavailable.'}
+    Architetural Spec: {spec_text or 'Unavailable.'}
 
     Prototype code to review:
     {engineering_code or 'Unavailable.'}
-
-    Identify mismatches, missing routes, validation gaps, and risky logic. If code is missing, flag as fail.
     """
-    parsed = call_ollama_json(
-        system_prompt, user_prompt, qa_schema, reasoning=False
-    )
+    parsed = call_ollama_json(system_prompt, user_prompt, qa_schema)
     if not parsed:
         return "QA review unavailable. No structured response returned."
-
     lines = [f"Verdict: {parsed.get('verdict', 'unknown')}"]
     findings = parsed.get("findings") or []
     if findings:
@@ -881,7 +929,6 @@ def run_qa_review(
         for rec in recs:
             lines.append(f"- {rec}")
     return "\n".join(lines).strip()
-
 
 def run_duckduckgo_research(product_idea: str) -> str:
     """Fallback DuckDuckGo search with multiple strategies."""
@@ -993,31 +1040,27 @@ def ux_design_node(state: AgentState):
 
 def engineering_node(state: AgentState):
     logger.info(f"--- Node: engineering_node (Task ID: {state['task_id']}) ---")
-    file_name, code = generate_engineering_prototype(
+    state['engineering_spec'] = generate_engineering_spec(
         state['product_idea'],
         state.get('user_stories'),
         state.get('user_flow_diagram'),
-        state.get('wireframe_html'),
+    )
+    file_name, code = generate_engineering_code_from_spec(
+        state['product_idea'],
+        state.get('user_stories'),
+        state.get('engineering_spec'),
     )
     state['engineering_file_name'] = file_name
     state['engineering_code'] = code
-    state['status'] = "pending_engineering_approval"
-    state['pending_approval_content'] = (
-        "Review the generated backend prototype. Approve to send it to QA."
-    )
-    return state
-
-
-def qa_review_node(state: AgentState):
-    logger.info(f"--- Node: qa_review_node (Task ID: {state['task_id']}) ---")
-    state['qa_review'] = run_qa_review(
+    state['engineering_qa'] = run_engineering_qa_review(
         state['product_idea'],
         state.get('user_stories'),
+        state.get('engineering_spec'),
         state.get('engineering_code'),
     )
-    state['status'] = "pending_qa_approval"
+    state['status'] = "pending_engineering_bundle_approval"
     state['pending_approval_content'] = (
-        "QA review completed. Approve to hand off to GTM."
+        "Review the engineering bundle (spec, code, QA). Approve to hand off to GTM."
     )
     return state
 
@@ -1028,6 +1071,7 @@ def approved_node(state: AgentState):
     state['pending_approval_content'] = None
     return state
 
+
 # --- Graph Definition ---
 workflow = StateGraph(AgentState)
 workflow.add_node("research", research_node)
@@ -1035,15 +1079,13 @@ workflow.add_node("product_prd", product_prd_node)
 workflow.add_node("product_stories", product_stories_node)
 workflow.add_node("ux_design", ux_design_node)
 workflow.add_node("engineering", engineering_node)
-workflow.add_node("qa_review", qa_review_node)
 workflow.add_node("approved", approved_node)
 workflow.set_entry_point("research")
 workflow.add_edge("research", "product_prd")
 workflow.add_edge("product_prd", "product_stories")
 workflow.add_edge("product_stories", "ux_design")
 workflow.add_edge("ux_design", "engineering")
-workflow.add_edge("engineering", "qa_review")
-workflow.add_edge("qa_review", "approved")
+workflow.add_edge("engineering", "approved")
 workflow.add_edge("approved", END)
 
 
@@ -1060,7 +1102,6 @@ async def initialize_graph():
             "product_stories",
             "ux_design",
             "engineering",
-            "qa_review",
             "approved",
         ],
     )
@@ -1106,9 +1147,10 @@ class TaskStatus(BaseModel):
     user_stories: Optional[str] = None
     user_flow_diagram: Optional[str] = None
     wireframe_html: Optional[str] = None
+    engineering_spec: Optional[str] = None
     engineering_file_name: Optional[str] = None
     engineering_code: Optional[str] = None
-    qa_review: Optional[str] = None
+    engineering_qa: Optional[str] = None
     last_rejected_step: Optional[str] = None
     last_rejected_at: Optional[str] = None
     class Config:
@@ -1121,9 +1163,10 @@ class ArtifactUpdate(BaseModel):
     user_stories: Optional[str] = None
     user_flow_diagram: Optional[str] = None
     wireframe_html: Optional[str] = None
+    engineering_spec: Optional[str] = None
     engineering_file_name: Optional[str] = None
     engineering_code: Optional[str] = None
-    qa_review: Optional[str] = None
+    engineering_qa: Optional[str] = None
 
 
 class RespondToApprovalRequest(BaseModel):
@@ -1142,8 +1185,7 @@ PENDING_STATUSES = {
     "pending_prd_approval",
     "pending_story_approval",
     "pending_ux_approval",
-    "pending_engineering_approval",
-    "pending_qa_approval",
+    "pending_engineering_bundle_approval",
     "pending_approval",
 }
 
@@ -1164,9 +1206,10 @@ def apply_artifact_overrides(task_id: str, overrides: ArtifactUpdate, db: Sessio
         "user_stories",
         "user_flow_diagram",
         "wireframe_html",
+        "engineering_spec",
         "engineering_file_name",
         "engineering_code",
-        "qa_review",
+        "engineering_qa",
     ):
         value = getattr(overrides, field)
         if value is not None:
@@ -1183,8 +1226,7 @@ STEP_STATUS_MAP = {
     "product_prd": "pending_prd_approval",
     "product_stories": "pending_story_approval",
     "ux_design": "pending_ux_approval",
-    "engineering": "pending_engineering_approval",
-    "qa_review": "pending_qa_approval",
+    "engineering": "pending_engineering_bundle_approval",
 }
 
 
@@ -1197,41 +1239,44 @@ def clear_artifacts_for_step(db_task: Task, step: str):
             "user_stories",
             "user_flow_diagram",
             "wireframe_html",
+            "engineering_spec",
             "engineering_file_name",
             "engineering_code",
-            "qa_review",
+            "engineering_qa",
         ],
         "product_prd": [
             "prd_summary",
             "user_stories",
             "user_flow_diagram",
             "wireframe_html",
+            "engineering_spec",
             "engineering_file_name",
             "engineering_code",
-            "qa_review",
+            "engineering_qa",
         ],
         "product_stories": [
             "user_stories",
             "user_flow_diagram",
             "wireframe_html",
+            "engineering_spec",
             "engineering_file_name",
             "engineering_code",
-            "qa_review",
+            "engineering_qa",
         ],
         "ux_design": [
             "user_flow_diagram",
             "wireframe_html",
             "engineering_file_name",
-            "engineering_code",
-            "qa_review",
-        ],
-        "engineering": [
+            "engineering_spec",
             "engineering_file_name",
             "engineering_code",
-            "qa_review",
+            "engineering_qa",
         ],
-        "qa_review": [
-            "qa_review",
+        "engineering": [
+            "engineering_spec",
+            "engineering_file_name",
+            "engineering_code",
+            "engineering_qa",
         ],
     }
     fields = downstream_fields.get(step, [])
@@ -1247,8 +1292,7 @@ def status_to_step(status: str | None) -> Optional[str]:
         "pending_prd_approval": "product_prd",
         "pending_story_approval": "product_stories",
         "pending_ux_approval": "ux_design",
-        "pending_engineering_approval": "engineering",
-        "pending_qa_approval": "qa_review",
+        "pending_engineering_bundle_approval": "engineering",
     }
     return inverse.get(status)
 
@@ -1264,9 +1308,10 @@ def build_state_from_task(db_task: Task) -> AgentState:
         "user_stories": db_task.user_stories,
         "user_flow_diagram": db_task.user_flow_diagram,
         "wireframe_html": db_task.wireframe_html,
+        "engineering_spec": db_task.engineering_spec,
         "engineering_file_name": db_task.engineering_file_name,
         "engineering_code": db_task.engineering_code,
-        "qa_review": db_task.qa_review,
+        "engineering_qa": db_task.engineering_qa,
         "last_rejected_step": db_task.last_rejected_step,
     }
 
@@ -1299,6 +1344,12 @@ async def start_task(request: StartTaskRequest, db: Session = Depends(get_db)):
         user_stories=None,
         user_flow_diagram=None,
         wireframe_html=None,
+        engineering_spec=None,
+        engineering_file_name=None,
+        engineering_code=None,
+        engineering_qa=None,
+        last_rejected_step=None,
+        last_rejected_at=None,
     )
     config = {"configurable": {"thread_id": task_id}}
 
@@ -1319,6 +1370,12 @@ async def start_task(request: StartTaskRequest, db: Session = Depends(get_db)):
     db_task.user_stories = interrupted_state.values.get('user_stories')
     db_task.user_flow_diagram = interrupted_state.values.get('user_flow_diagram')
     db_task.wireframe_html = interrupted_state.values.get('wireframe_html')
+    db_task.engineering_spec = interrupted_state.values.get('engineering_spec')
+    db_task.engineering_file_name = interrupted_state.values.get('engineering_file_name')
+    db_task.engineering_code = interrupted_state.values.get('engineering_code')
+    db_task.engineering_qa = interrupted_state.values.get('engineering_qa')
+    db_task.last_rejected_step = interrupted_state.values.get('last_rejected_step')
+    db_task.last_rejected_at = interrupted_state.values.get('last_rejected_at')
     db.commit()
     db.refresh(db_task)
     logger.info(f"Task {task_id} updated in DB to status '{db_task.status}'.")
@@ -1332,8 +1389,7 @@ def get_pending_approval(db: Session = Depends(get_db)):
         "pending_prd_approval",
         "pending_story_approval",
         "pending_ux_approval",
-        "pending_engineering_approval",
-        "pending_qa_approval",
+        "pending_engineering_bundle_approval",
         "pending_approval",  # backward compatibility
     ]
     pending_task = (
@@ -1373,9 +1429,10 @@ def export_tasks(db: Session = Depends(get_db)):
             "User Stories",
             "User Flow Diagram",
             "Wireframe HTML",
+            "Engineering Spec",
             "Engineering File Name",
             "Engineering Code",
-            "QA Review",
+            "Engineering QA",
             "Last Rejected Step",
             "Last Rejected At",
             "Pending Approval Content",
@@ -1392,9 +1449,10 @@ def export_tasks(db: Session = Depends(get_db)):
                 task.user_stories or "",
                 task.user_flow_diagram or "",
                 task.wireframe_html or "",
+                task.engineering_spec or "",
                 task.engineering_file_name or "",
                 task.engineering_code or "",
-                task.qa_review or "",
+                task.engineering_qa or "",
                 task.last_rejected_step or "",
                 task.last_rejected_at or "",
                 task.pending_approval_content or "",
@@ -1414,8 +1472,7 @@ async def respond_to_approval(request: RespondToApprovalRequest, db: Session = D
         "pending_prd_approval",
         "pending_story_approval",
         "pending_ux_approval",
-        "pending_engineering_approval",
-        "pending_qa_approval",
+        "pending_engineering_bundle_approval",
         "pending_approval",
     }
     db_task = db.query(Task).filter(Task.task_id == request.task_id).first()
@@ -1452,9 +1509,10 @@ async def respond_to_approval(request: RespondToApprovalRequest, db: Session = D
         'user_stories',
         'user_flow_diagram',
         'wireframe_html',
+        'engineering_spec',
         'engineering_file_name',
         'engineering_code',
-        'qa_review',
+        'engineering_qa',
     ]
     for field in artifact_fields:
         current_value = getattr(db_task, field)
@@ -1491,7 +1549,6 @@ async def resubmit_step(request: ResubmitRequest, db: Session = Depends(get_db))
         "product_stories": product_stories_node,
         "ux_design": ux_design_node,
         "engineering": engineering_node,
-        "qa_review": qa_review_node,
     }
     step_fn = step_fn_map.get(request.step)
     if not step_fn:
@@ -1505,9 +1562,10 @@ async def resubmit_step(request: ResubmitRequest, db: Session = Depends(get_db))
     db_task.user_stories = updated_state.get("user_stories")
     db_task.user_flow_diagram = updated_state.get("user_flow_diagram")
     db_task.wireframe_html = updated_state.get("wireframe_html")
+    db_task.engineering_spec = updated_state.get("engineering_spec")
     db_task.engineering_file_name = updated_state.get("engineering_file_name")
     db_task.engineering_code = updated_state.get("engineering_code")
-    db_task.qa_review = updated_state.get("qa_review")
+    db_task.engineering_qa = updated_state.get("engineering_qa")
     db_task.last_rejected_step = None
     db_task.last_rejected_at = None
     db.commit()
@@ -1534,8 +1592,7 @@ def get_next_status(current_status: Optional[str]) -> Optional[str]:
         "pending_prd_approval",
         "pending_story_approval",
         "pending_ux_approval",
-        "pending_engineering_approval",
-        "pending_qa_approval",
+        "pending_engineering_bundle_approval",
         "ready_for_gtm",
         "completed",
         "rejected",

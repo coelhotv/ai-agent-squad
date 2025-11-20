@@ -11,10 +11,10 @@ class Settings(BaseSettings):
         "deepseek-r1:8b-0528-qwen3-q4_K_M", env="OLLAMA_REASONING_MODEL"
     )
     ollama_coding_model: str = Field(
-        "qwen2.5-coder:7b-instruct-q4_K_M", env="OLLAMA_CODING_MODEL"
+        "qwen2.5-coder:7b-instruct-q6_K", env="OLLAMA_CODING_MODEL"
     )
     ollama_model: str | None = Field(
-        "deepseek-r1:8b-0528-qwen3-q4_K_M", env="OLLAMA_MODEL"
+        "gemma3:4b", env="OLLAMA_MODEL"
     )
     perplexity_api_key: str | None = Field(default=None, env="PERPLEXITY_API_KEY")
     perplexity_api_url: AnyUrl = Field(

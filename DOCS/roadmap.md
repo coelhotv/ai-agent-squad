@@ -8,7 +8,7 @@ Each phase represents a major milestone in the Multi-Agent Product Squad. Status
 
 - Hybrid architecture: Dockerized FastAPI + LangGraph, native Ollama host.
 - `docker-compose.yml`, `Dockerfile`, and `requirements.txt` created.
-- Ollama model switched to `deepseek-r1:8b-0528-qwen3-q4_K_M`, and we now pair it with `qwen2.5-coder:7b-instruct-q4_K_M` for coding-intensive specialists.
+- Ollama model switched to `deepseek-r1:8b-0528-qwen3-q4_K_M`, and we now pair it with `qwen2.5-coder:7b-instruct-q6_K` for coding-intensive specialists.
 - SQLite persistence established (`tasks.db`, `checkpoints.sqlite`).
 - Hello-world flow validated (logging, connectivity, vscode/.venv setup).
 
@@ -35,26 +35,23 @@ Each phase represents a major milestone in the Multi-Agent Product Squad. Status
 
 ### Phase 4.5 – Collaborative Approvals (✅)
 
-Before moving to Phase 5 we will let humans edit every artifact before approving it so they can improve the research/PRD/stories/UX work instead of only gating it. Planned work:
-1. Add edit controls next to each artifact that are active only while the corresponding `pending_*` status is waiting.
-2. Persist edits to `tasks.db` and pass the new text back into the graph state (or reload it from the DB) so downstream agents consume the human updates.
-3. Allow the preview buttons to render the edited flow/wireframe content, and lock the fields once the task advances past approval/rejection.
-4. Once this collaboration layer is stable, proceed to Phase 5 (Engineering + QA).
+Now we can let humans edit every artifact before approving it so they can improve the research/PRD/stories/UX work instead of only gating it.
+- Add edit controls next to each artifact that are active only while the corresponding `pending_*` status is waiting.
+- Persist edits to `tasks.db` and pass the new text back into the graph state (or reload it from the DB) so downstream agents consume the human updates.
+- Allow the preview buttons to render the edited flow/wireframe content, and lock the fields once the task advances past approval/rejection.
+- Included a re-submit flow for artifacts that are rejected. Now HITL could redo the last agent flow to create a new version of its artifact.
+
+### Phase 5 – Build Sprint (✅)
+
+- Engineering runs as a bundle: spec (schemas + endpoints), code generation, and QA review in one HITL step.
+- Approvers see the spec, code, and QA output together at `pending_engineering_bundle_approval`; edits/resubmits rerun the bundle.
+- New artifacts (`engineering_spec`, `engineering_code`, `engineering_qa`) are rendered in the UI and exported via `/tasks/export`.
 
 ## In Progress
 
 - None
 
 ## Future Phases
-
-### Phase 5 – Build Sprint (✅)
-
-Objective: Add Engineering and QA agents.
-
-Completed work:
-- Engineering agent generates a single-file FastAPI prototype (filename + code) using the coding model.
-- QA agent reviews the generated code against the PRD/stories and produces an approval-gated findings report.
-- New statuses (`pending_engineering_approval`, `pending_qa_approval`, `ready_for_gtm`) and artifacts are rendered in the UI and exported via `/tasks/export`.
 
 ### Phase 6 – Ship (🟢)
 

@@ -50,29 +50,22 @@ Once the stories are approved, the UX agent runs automatically:
 
 All UX outputs are stored in `tasks.db`, listed on `/tasks_dashboard`, and included in `/tasks/export`.
 
-### 5. Engineering Prototype (Phase 5)
+### 5. Engineering Bundle (Phase 5)
 
-After UX approval, the Engineering agent runs (coding model) to generate a single-file FastAPI prototype based on the PRD, stories, flow, and wireframe context:
+After UX approval, the Engineering bundle runs as a single step:
 
-1. Status changes to `pending_engineering_approval` with the generated filename/code attached to the task.
-2. Humans can review/edit the prototype code in the UI before approving.
-3. Approval resumes the graph and hands the artifact to QA.
+1. An architecture/spec agent lists the Pydantic v2 schemas and FastAPI endpoints required (interface only).
+2. A coding agent implements that spec into a single-file FastAPI app.
+3. A QA agent reviews the code against the spec/stories for validation, conflicts, logging, and CORS.
+4. Status changes to `pending_engineering_bundle_approval`, and the UI surfaces the spec, code, and QA review together for HITL approval/editing/resubmit.
 
-### 6. QA Review (Phase 5)
-
-QA executes after engineering approval:
-
-1. The QA agent reviews the generated code against the PRD/stories and flags risks or gaps.
-2. Status changes to `pending_qa_approval`, and the structured QA review is shown in the UI.
-3. Human approval advances the workflow to `ready_for_gtm`, setting the stage for the GTM agent in Phase 6.
-
-### 7. Watching the Dashboard
+### 6. Watching the Dashboard
 
 `tasks.html` renders the full table of tasks with elastic columns and proper status badges. The manual refresh button hits `GET /tasks`, while auto polling keeps data fresh. Export everything at once with `GET /tasks/export` (via the **Export CSV** button). Artifact collapsibles on the main intake page mirror the latest research, PRD, story, flow, and wireframe content so approvers can stay in one place.
 
-### 8. Next Specialist Phases
+### 7. Next Specialist Phases
 
-With Phase 5 live, the graph now pauses at `status="ready_for_gtm"` after QA approval. The GTM node in Phase 6 will follow the same pattern:
+With Phase 5 live, the graph now pauses at `status="ready_for_gtm"` after the engineering bundle is approved. The GTM node in Phase 6 will follow the same pattern:
 
 - Produce structured output.
 - Save it to the task record.

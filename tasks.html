@@ -201,9 +201,9 @@
                     <td><div class="wide-cell"><pre>${escapeHtml(task.user_stories || '')}</pre></div></td>
                     <td><div class="wide-cell"><pre>${escapeHtml(task.user_flow_diagram || '')}</pre></div></td>
                     <td><div class="wide-cell"><pre>${escapeHtml(task.wireframe_html || '')}</pre></div></td>
-                    <td>${escapeHtml(task.engineering_file_name || '')}</td>
+                    <td><div class="wide-cell"><pre>${escapeHtml(task.engineering_spec || '')}</pre></div></td>
                     <td><div class="wide-cell"><pre>${escapeHtml(task.engineering_code || '')}</pre></div></td>
-                    <td><div class="wide-cell"><pre>${escapeHtml(task.qa_review || '')}</pre></div></td>
+                    <td><div class="wide-cell"><pre>${escapeHtml(task.engineering_qa || '')}</pre></div></td>
                     <td>${escapeHtml(task.last_rejected_step || '')}</td>
                     <td>${escapeHtml(task.last_rejected_at || '')}</td>
                     <td>${renderResubmit(task)}</td>
@@ -224,9 +224,9 @@
                                 <th>User Stories</th>
                                 <th>User Flow Diagram</th>
                                 <th>Wireframe HTML</th>
-                                <th>Engineering File</th>
+                                <th>Engineering Spec</th>
                                 <th>Engineering Code</th>
-                                <th>QA Review</th>
+                                <th>Engineering QA</th>
                                 <th>Last Rejected Step</th>
                                 <th>Last Rejected At</th>
                                 <th>Resubmit</th>

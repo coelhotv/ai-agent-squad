@@ -34,7 +34,7 @@ This is the most critical part of our setup. We are balancing performance with i
 
 - **LLM Engine (Host):** **Ollama runs as a native macOS App.**
 
-- **Rationale:** This gives us 100% access to the M2's GPU (Metal) for massive performance. The model `deepseek-r1:8b-0528-qwen3-q4_K_M` powers reasoning agents and lives on the host, while `qwen2.5-coder:7b-instruct-q4_K_M` handles UX/Engineering/QA calls.
+- **Rationale:** This gives us 100% access to the M2's GPU (Metal) for massive performance. The model `deepseek-r1:8b-0528-qwen3-q4_K_M` powers reasoning agents and lives on the host, while `qwen2.5-coder:7b-instruct-q6_K` handles UX/Engineering/QA calls.
 
 - **Agent Application (Docker):** **Our Python code (FastAPI, LangGraph) runs inside a Docker container.**
 
@@ -149,15 +149,15 @@ This is the most critical part of our setup. We are balancing performance with i
 5. The dashboard and intake UI has a new version where the HITL could collaborate with the agents, actually reviewing/ editing each artifact once its ready for approval. WHen editing the artifact, the UI opens an overlay edit box with options to `Save` or `Cancel`.
 
 
-**Phase 5: The Build Sprint - "Engineering" & "QA" Agents - (COMPLETED)**
+**Phase 5: The Build Sprint - Engineering Bundle (COMPLETED)**
 
-- **Goal:** Add the "Engineering" and "QA" agents to write and review code.
+- **Goal:** Deliver engineering work as one bundle: spec + code + QA.
 
 - **Actions:**
 
-1. Added `engineering` and `qa_review` nodes. Engineering generates a single-file FastAPI prototype (filename + code) using the coding model.
+1. Added an engineering bundle node that first drafts the API schemas/endpoints, then generates the FastAPI prototype from that spec, then runs QA against the spec/stories/code.
 
-2. Implemented the QA code-review loop with `pending_engineering_approval` and `pending_qa_approval` gating before handing off to GTM.
+2. The bundle pauses at `pending_engineering_bundle_approval` so HITL can review/edit/resubmit spec/code/QA together before handing off to GTM.
 
 **Phase 6: The "Ship" - "GTM" & Final Output**
 
