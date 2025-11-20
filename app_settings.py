@@ -8,13 +8,13 @@ class Settings(BaseSettings):
     checkpoints_path: str = Field("/data/checkpoints.sqlite", env="CHECKPOINTS_PATH")
     ollama_base_url: AnyUrl = Field("http://host.docker.internal:11434", env="OLLAMA_BASE_URL")
     ollama_reasoning_model: str = Field(
-        "deepseek-r1:14b-qwen-distill-q4_K_M", env="OLLAMA_REASONING_MODEL"
+        "deepseek-r1:8b-0528-qwen3-q4_K_M", env="OLLAMA_REASONING_MODEL"
     )
     ollama_coding_model: str = Field(
-        "qwen2.5-coder:14b-instruct-q4_K_M", env="OLLAMA_CODING_MODEL"
+        "qwen2.5-coder:7b-instruct-q4_K_M", env="OLLAMA_CODING_MODEL"
     )
     ollama_model: str | None = Field(
-        "deepseek-r1:14b-qwen-distill-q4_K_M", env="OLLAMA_MODEL"
+        "deepseek-r1:8b-0528-qwen3-q4_K_M", env="OLLAMA_MODEL"
     )
     perplexity_api_key: str | None = Field(default=None, env="PERPLEXITY_API_KEY")
     perplexity_api_url: AnyUrl = Field(

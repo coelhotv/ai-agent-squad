@@ -34,7 +34,7 @@ This is the most critical part of our setup. We are balancing performance with i
 
 - **LLM Engine (Host):** **Ollama runs as a native macOS App.**
 
-- **Rationale:** This gives us 100% access to the M2's GPU (Metal) for massive performance. The model `deepseek-r1:14b-qwen-distill-q4_K_M` powers reasoning agents and lives on the host, while `qwen2.5-coder:14b-instruct-q4_K_M` handles UX/Engineering/QA calls.
+- **Rationale:** This gives us 100% access to the M2's GPU (Metal) for massive performance. The model `deepseek-r1:8b-0528-qwen3-q4_K_M` powers reasoning agents and lives on the host, while `qwen2.5-coder:7b-instruct-q4_K_M` handles UX/Engineering/QA calls.
 
 - **Agent Application (Docker):** **Our Python code (FastAPI, LangGraph) runs inside a Docker container.**
 
@@ -89,7 +89,7 @@ This is the most critical part of our setup. We are balancing performance with i
 
 3. Created `Dockerfile` and `requirements.txt`.
 
-4. **Decision:** Swapped `llama3` for `deepseek-r1:14b-qwen-distill-q4_K_M` for better reasoning.
+4. **Decision:** Swapped `llama3` for `deepseek-r1:8b-0528-qwen3-q4_K_M` for better reasoning.
 
 5. **Decision:** Moved Ollama to a native macOS app for GPU performance.
 

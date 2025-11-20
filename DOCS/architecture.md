@@ -4,7 +4,7 @@
 
 The app is purposely split between a **native LLM host** and a **containerized Python backend**:
 
-1. **LLM Host (macOS):** Ollama runs outside Docker to keep GPU access to the M2’s Metal cores. The reasoning agents rely on `deepseek-r1:14b-qwen-distill-q4_K_M` while UX/Engineering/QA use `qwen2.5-coder:14b-instruct-q4_K_M`; both are available via the same `http://host.docker.internal:11434` endpoint.
+1. **LLM Host (macOS):** Ollama runs outside Docker to keep GPU access to the M2’s Metal cores. The reasoning agents rely on `deepseek-r1:8b-0528-qwen3-q4_K_M` while UX/Engineering/QA use `qwen2.5-coder:7b-instruct-q4_K_M`; both are available via the same `http://host.docker.internal:11434` endpoint.
 2. **Agent Backend (Docker):** FastAPI + LangGraph + persistence modules live inside the `app` service defined in `docker-compose.yml`. This keeps dependencies clean and replicable.
 3. **Bridge:** `app.py` talks to Ollama through the Docker special DNS name provided by Docker Desktop; no VPNs or extra proxies are needed.
 

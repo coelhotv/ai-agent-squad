@@ -299,7 +299,7 @@ def call_ollama_json(
 
     try:
         start_time = time.time()
-        with httpx.Client(timeout=240) as client:
+        with httpx.Client(timeout=300) as client:
             response = client.post(f"{OLLAMA_BASE_URL}api/generate", json=payload)
             response.raise_for_status()
             data = response.json()
