@@ -157,7 +157,7 @@ This is the most critical part of our setup. We are balancing performance with i
 
 1. Added an engineering bundle node that first drafts the API schemas/endpoints, then generates the FastAPI prototype from that spec, then runs QA against the spec/stories/code.
 
-2. The bundle pauses at `pending_engineering_bundle_approval` so HITL can review/edit/resubmit spec/code/QA together before handing off to GTM.
+2. The bundle pauses at `pending_code_approval` so HITL can review/edit/resubmit spec/code/QA together before handing off to GTM.
 
 **Phase 6: The "Ship" - "GTM" & Final Output**
 

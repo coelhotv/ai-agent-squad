@@ -1115,7 +1115,7 @@ def developer_node(state: AgentState):
     )
     state['engineering_file_name'] = file_name or "main.py"
     state['engineering_code'] = code or "# Code generation failed"
-    state['status'] = "pending_engineering_bundle_approval"
+    state['status'] = "pending_code_approval"
     state['pending_approval_content'] = (
         "Developer has implemented the spec. Review the code and approve to complete."
     )
@@ -1247,7 +1247,7 @@ PENDING_STATUSES = {
     "pending_story_approval",
     "pending_ux_approval",
     "pending_spec_approval",
-    "pending_engineering_bundle_approval",
+    "pending_code_approval",
     "pending_approval",
 }
 
@@ -1290,7 +1290,7 @@ STEP_STATUS_MAP = {
     "product_stories": "pending_story_approval",
     "ux_design": "pending_ux_approval",
     "spec": "pending_spec_approval",
-    "engineering": "pending_engineering_bundle_approval",
+    "engineering": "pending_code_approval",
 }
 
 
@@ -1369,7 +1369,7 @@ def status_to_step(status: str | None) -> Optional[str]:
         "pending_story_approval": "product_stories",
         "pending_ux_approval": "ux_design",
         "pending_spec_approval": "spec",
-        "pending_engineering_bundle_approval": "engineering",
+        "pending_code_approval": "engineering",
     }
     return inverse.get(status)
 
@@ -1470,7 +1470,7 @@ def get_pending_approval(db: Session = Depends(get_db)):
         "pending_story_approval",
         "pending_ux_approval",
         "pending_spec_approval",
-        "pending_engineering_bundle_approval",
+        "pending_code_approval",
         "pending_approval",  # backward compatibility
     ]
     pending_task = (
@@ -1556,7 +1556,7 @@ async def respond_to_approval(request: RespondToApprovalRequest, db: Session = D
         "pending_story_approval",
         "pending_ux_approval",
         "pending_spec_approval",
-        "pending_engineering_bundle_approval",
+        "pending_code_approval",
         "pending_approval",
     }
     db_task = db.query(Task).filter(Task.task_id == request.task_id).first()
@@ -1680,7 +1680,7 @@ def get_next_status(current_status: Optional[str]) -> Optional[str]:
         "pending_story_approval",
         "pending_ux_approval",
         "pending_spec_approval",
-        "pending_engineering_bundle_approval",
+        "pending_code_approval",
         "ready_for_gtm",
         "completed",
         "rejected",

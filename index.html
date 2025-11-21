@@ -622,7 +622,7 @@
             { key: 'pending_story_approval', label: 'User Stories', description: 'Stories & ACs' },
             { key: 'pending_ux_approval', label: 'UX Design', description: 'Flows & wireframes' },
             { key: 'pending_spec_approval', label: 'Eng. Spec', description: 'API spec & QA' },
-            { key: 'pending_engineering_bundle_approval', label: 'Eng. Code', description: 'Code prototype' },
+            { key: 'pending_code_approval', label: 'Eng. Code', description: 'Code prototype' },
             { key: 'ready_for_gtm', label: 'GTM Handoff', description: 'Ready for launch docs' },
             { key: 'completed', label: 'Shipped', description: 'Final deliverables' },
             { key: 'rejected', label: 'Rejected', description: 'Manual review' },
@@ -635,7 +635,7 @@
             'pending_story_approval',
             'pending_ux_approval',
             'pending_spec_approval',
-            'pending_engineering_bundle_approval',
+            'pending_code_approval',
             'ready_for_gtm',
             'completed',
             'rejected',
@@ -648,7 +648,7 @@
             pending_story_approval: 'Product Agent',
             pending_ux_approval: 'UX Designer',
             pending_spec_approval: 'Architect Agent',
-            pending_engineering_bundle_approval: 'Engineering Agent',
+            pending_code_approval: 'Engineering Agent',
             ready_for_gtm: 'GTM Agent',
             completed: 'GTM Agent',
             rejected: 'Coordinator (Manual review)',
@@ -698,7 +698,7 @@
             'pending_story_approval',
             'pending_ux_approval',
             'pending_spec_approval',
-            'pending_engineering_bundle_approval',
+            'pending_code_approval',
             'pending_approval',
         ]);
 
@@ -708,7 +708,7 @@
             pending_story_approval: ['user_stories'],
             pending_ux_approval: ['user_flow_diagram', 'wireframe_html'],
             pending_spec_approval: ['engineering_spec', 'engineering_spec_qa'],
-            pending_engineering_bundle_approval: ['engineering_code'],
+            pending_code_approval: ['engineering_code'],
         };
 
         function updateCurrentStage(status) {
@@ -1092,7 +1092,7 @@ ${storedWireframeHtml}
                     "pending_story_approval",
                     "pending_ux_approval",
                     "pending_spec_approval",
-                    "pending_engineering_bundle_approval",
+                    "pending_code_approval",
                     "pending_approval"
                 ].includes(data.status)) {
                     showMessage(`Task ${data.task_id} advanced to ${data.status}. Waiting for the next approval.`);

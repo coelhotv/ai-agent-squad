@@ -45,7 +45,7 @@ Now we can let humans edit every artifact before approving it so they can improv
 
 - Engineering now runs as a two-step process for higher quality.
 - **Step 1 (Spec):** An Architect agent generates an API spec, which is immediately reviewed by a QA agent. This bundle is presented for HITL approval at `pending_spec_approval`.
-- **Step 2 (Code):** After spec approval, a Developer agent generates the code, which is presented for final approval at `pending_engineering_bundle_approval`.
+- **Step 2 (Code):** After spec approval, a Developer agent generates the code, which is presented for final approval at `pending_code_approval`.
 - New artifacts (`engineering_spec`, `engineering_spec_qa`, `engineering_code`) are rendered in the UI and exported.
 
 ## In Progress
