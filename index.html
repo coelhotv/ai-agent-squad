@@ -516,6 +516,13 @@
                         <button class="edit-btn" type="button" data-artifact="engineering_spec">Edit</button>
                     </div>
                 </details>
+                <details id="engineering-spec-qa-results">
+                    <summary>Eng. Spec QA</summary>
+                    <div class="artifact-row">
+                        <pre id="engineering-spec-qa">No spec QA yet.</pre>
+                        <button class="edit-btn" type="button" data-artifact="engineering_spec_qa">Edit</button>
+                    </div>
+                </details>
                 <details id="engineering-code-results">
                     <summary>Engineering Prototype</summary>
                     <div class="artifact-row">
@@ -576,8 +583,9 @@
         const viewFlowBtn = document.getElementById('view-flow-btn');
         const viewWireframeBtn = document.getElementById('view-wireframe-btn');
         const engineeringFileName = document.getElementById('engineering-filename');
-        const engineeringCode = document.getElementById('engineering-code');
         const engineeringSpec = document.getElementById('engineering-spec');
+        const engineeringSpecQa = document.getElementById('engineering-spec-qa');
+        const engineeringCode = document.getElementById('engineering-code');
         const engineeringQa = document.getElementById('engineering-qa');
         const qaReview = document.getElementById('qa-review');
         const overlay = document.getElementById('artifact-overlay');
@@ -600,6 +608,7 @@
             user_flow_diagram: document.getElementById('flow-status'),
             wireframe_html: document.getElementById('wireframe-status'),
             engineering_spec: engineeringSpec,
+            engineering_spec_qa: engineeringSpecQa,
             engineering_code: engineeringCode,
             engineering_qa: engineeringQa,
         };
@@ -612,7 +621,8 @@
             { key: 'pending_prd_approval', label: 'PRD', description: 'Product requirements' },
             { key: 'pending_story_approval', label: 'User Stories', description: 'Stories & ACs' },
             { key: 'pending_ux_approval', label: 'UX Design', description: 'Flows & wireframes' },
-            { key: 'pending_engineering_bundle_approval', label: 'Engineering', description: 'Spec, code, QA' },
+            { key: 'pending_spec_approval', label: 'Eng. Spec', description: 'API spec & QA' },
+            { key: 'pending_engineering_bundle_approval', label: 'Eng. Code', description: 'Code prototype' },
             { key: 'ready_for_gtm', label: 'GTM Handoff', description: 'Ready for launch docs' },
             { key: 'completed', label: 'Shipped', description: 'Final deliverables' },
             { key: 'rejected', label: 'Rejected', description: 'Manual review' },
@@ -624,6 +634,7 @@
             'pending_prd_approval',
             'pending_story_approval',
             'pending_ux_approval',
+            'pending_spec_approval',
             'pending_engineering_bundle_approval',
             'ready_for_gtm',
             'completed',
@@ -636,6 +647,7 @@
             pending_prd_approval: 'Product Agent',
             pending_story_approval: 'Product Agent',
             pending_ux_approval: 'UX Designer',
+            pending_spec_approval: 'Architect Agent',
             pending_engineering_bundle_approval: 'Engineering Agent',
             ready_for_gtm: 'GTM Agent',
             completed: 'GTM Agent',
@@ -685,6 +697,7 @@
             'pending_prd_approval',
             'pending_story_approval',
             'pending_ux_approval',
+            'pending_spec_approval',
             'pending_engineering_bundle_approval',
             'pending_approval',
         ]);
@@ -694,7 +707,8 @@
             pending_prd_approval: ['prd_summary'],
             pending_story_approval: ['user_stories'],
             pending_ux_approval: ['user_flow_diagram', 'wireframe_html'],
-            pending_engineering_bundle_approval: ['engineering_spec', 'engineering_code', 'engineering_qa'],
+            pending_spec_approval: ['engineering_spec', 'engineering_spec_qa'],
+            pending_engineering_bundle_approval: ['engineering_code'],
         };
 
         function updateCurrentStage(status) {
@@ -792,6 +806,7 @@
             renderWireframe(null);
             renderArtifact(engineeringSpec, null);
             renderEngineeringPrototype(null, null);
+            renderArtifact(engineeringSpecQa, null);
             renderArtifact(engineeringQa, null);
         }
 
@@ -802,6 +817,7 @@
             renderFlowDiagram(task?.user_flow_diagram);
             renderWireframe(task?.wireframe_html);
             renderArtifact(engineeringSpec, task?.engineering_spec);
+            renderArtifact(engineeringSpecQa, task?.engineering_spec_qa);
             renderEngineeringPrototype(task?.engineering_file_name, task?.engineering_code);
             renderArtifact(engineeringQa, task?.engineering_qa);
         }
@@ -1075,6 +1091,7 @@ ${storedWireframeHtml}
                     "pending_prd_approval",
                     "pending_story_approval",
                     "pending_ux_approval",
+                    "pending_spec_approval",
                     "pending_engineering_bundle_approval",
                     "pending_approval"
                 ].includes(data.status)) {

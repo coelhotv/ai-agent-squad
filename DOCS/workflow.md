@@ -50,14 +50,15 @@ Once the stories are approved, the UX agent runs automatically:
 
 All UX outputs are stored in `tasks.db`, listed on `/tasks_dashboard`, and included in `/tasks/export`.
 
-### 5. Engineering Bundle (Phase 5)
+### 5. Engineering Sprint (Phase 5)
 
-After UX approval, the Engineering bundle runs as a single step:
+After UX approval, the Engineering sprint runs as two distinct HITL steps:
 
-1. An architecture/spec agent lists the Pydantic v2 schemas and FastAPI endpoints required (interface only).
-2. A coding agent implements that spec into a single-file FastAPI app.
-3. A QA agent reviews the code against the spec/stories for validation, conflicts, logging, and CORS.
-4. Status changes to `pending_engineering_bundle_approval`, and the UI surfaces the spec, code, and QA review together for HITL approval/editing/resubmit.
+1.  **Specification & Review:** The `engineering_spec_node` runs, where an Architect agent generates an API specification and a QA agent immediately reviews it for logical gaps. The status changes to `pending_spec_approval`, and the UI surfaces both the spec and the QA review for HITL approval.
+2.  **Implementation:** Once the spec is approved, the `developer_node` runs. A coding agent implements the approved spec into a single-file FastAPI app.
+3.  **Final Code Review:** The status changes to `pending_engineering_bundle_approval`, and the UI surfaces the final generated code for HITL approval.
+
+This two-step process ensures a higher-quality spec is fed to the developer agent, reducing bugs and improving the final output.
 
 ### 6. Watching the Dashboard
 

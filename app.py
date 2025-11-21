@@ -59,10 +59,10 @@ class Task(Base):
     user_stories = Column(Text, nullable=True)
     user_flow_diagram = Column(Text, nullable=True)
     wireframe_html = Column(Text, nullable=True)
+    engineering_spec = Column(Text, nullable=True)
+    engineering_spec_qa = Column(Text, nullable=True)
     engineering_file_name = Column(Text, nullable=True)
     engineering_code = Column(Text, nullable=True)
-    qa_review = Column(Text, nullable=True)
-    engineering_spec = Column(Text, nullable=True)
     engineering_qa = Column(Text, nullable=True)
     last_rejected_step = Column(Text, nullable=True)
     last_rejected_at = Column(String, nullable=True)
@@ -83,9 +83,9 @@ for col_name in (
     "user_flow_diagram",
     "wireframe_html",
     "engineering_file_name",
-    "engineering_code",
-    "qa_review",
     "engineering_spec",
+    "engineering_spec_qa",
+    "engineering_code",
     "engineering_qa",
     "last_rejected_step",
     "last_rejected_at",
@@ -110,10 +110,10 @@ class AgentState(TypedDict):
     user_stories: Optional[str]
     user_flow_diagram: Optional[str]
     wireframe_html: Optional[str]
+    engineering_spec: Optional[str]
+    engineering_spec_qa: Optional[str]
     engineering_file_name: Optional[str]
     engineering_code: Optional[str]
-    qa_review: Optional[str]
-    engineering_spec: Optional[str]
     engineering_qa: Optional[str]
     last_rejected_step: Optional[str]
 
@@ -530,8 +530,8 @@ def generate_user_stories(product_idea: str, prd_summary: str | None) -> str:
     )
     user_prompt = (
         f"Idea: {product_idea}.\nPRD context: {prd_summary or 'Unavailable.'}\n"
-        " Produce 2 user stories to be in the MVP, plus 1-2 user stories for a second release."
-        " Number sequentially each story. For each story, provide 2-3 acceptance criteria."
+        " Produce two high-value user stories to be in the MVP."
+        " Number each story sequentially. For each story, provide 2-3 acceptance criteria."
         " End with a short backlog list."
     )
     parsed = call_ollama_json(
@@ -674,7 +674,7 @@ def generate_wireframe_html(product_idea: str, user_stories: str | None, flow_di
     system_prompt = (
         "You are a Senior UI/UX Prototyper. Your goal is to create a low-fidelity wireframe writing HTML and Tailwind CSS code. "
         "Think in terms of reusable components like headers, cards, and sections."
-        "Use the user stories, acceptance criteria, and user flow as inputs. "
+        "Use the user stories, its acceptance criteria, and user flow as inputs. "
     )
     user_prompt = f"""
         Idea: {product_idea}.
@@ -741,6 +741,11 @@ def generate_engineering_spec(
     spec_schema = {
         "type": "object",
         "properties": {
+            "reasoning_steps": {
+                "type": "array",
+                "description": "Explain your step-by-step plan to meet all user stories and acceptance criteria before defining schemas.",
+                "items": {"type": "string"},
+            },
             "schemas": {
                 "type": "array",
                 "items": {
@@ -781,16 +786,19 @@ def generate_engineering_spec(
                 },
             },
         },
-        "required": ["schemas", "endpoints"],
+        "required": ["reasoning_steps", "schemas", "endpoints"],
     }
     system_prompt = (
         "You are a Senior Software Architect specializing in FastAPI, Pydantic v2, and uvicorn.\n"
-        "Review the user stories/AC and propose the interface contract.\n"
-        "Output JSON matching the provided schema exactly:\n"
-        "- schemas: Pydantic v2 models (name, fields with types/required/validators using field_validator terminology).\n"
-        "- endpoints: method, path, params, body/response models, error cases. Paths must include all parameters.\n"
-        "Include parent lifecycle endpoints if referenced (e.g., users/teams). Plan conflict/missing-resource handling.\n"
-        "Your interface contract must cover ONLY the initial two (1 & 2) User Stories/AC + flow provided.\n"
+        "First, write down your reasoning steps. Then, define the interface contract. Output JSON matching the provided schema exactly.\n"
+        "Your plan must explicitly cover every AC. Your final spec must be self-contained and consistent.\n"
+        "1. **reasoning_steps**: Explain how your API design will satisfy each user story and AC.\n"
+        "2. **schemas**: Define ALL Pydantic v2 models, including any custom response models used by endpoints. Use `field_validator` for custom validation logic.\n"
+        "3. **endpoints**: Define RESTful endpoints. Paths for user-specific data MUST be nested under `/users/{user_id}/`. For example, `POST /users/{user_id}/xyz/` is correct; `POST /xyz/` is incorrect.\n"
+        "CRITICAL CHECKS:\n"
+        "- Ensure every model mentioned in an endpoint's `response_model` is defined in the `schemas` list.\n"
+        "- Ensure all paths that create or retrieve user-specific data are correctly nested under a user path parameter.\n"
+        "Include parent lifecycle endpoints if referenced (e.g., users/teams). Plan for 404 (Not Found) and 400 (Invalid Data) errors.\n"
         "Do NOT write implementation logic."
     )
     user_prompt = f"""
@@ -802,13 +810,55 @@ def generate_engineering_spec(
     User flow (Mermaid) for context:
     {user_flow_diagram or 'Unavailable.'}
 
-    Now, design the database models and API endpoints needed.
+    Now, design the data schemas and API endpoints needed.
     """
     parsed = call_ollama_json(system_prompt, user_prompt, spec_schema)
-    if parsed and parsed.get("database_models") and parsed.get("api_endpoints"):
+    if parsed and parsed.get("schemas") and parsed.get("endpoints"):
         return json.dumps(parsed, indent=2)
     return "Spec unavailable"
 
+
+def run_spec_qa_review(
+    product_idea: str,
+    user_stories: str | None,
+    spec_text: str | None,
+) -> str:
+    qa_schema = {
+        "type": "object",
+        "properties": {
+            "verdict": {"type": "string", "enum": ["pass", "fail"]},
+            "findings": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "severity": {"type": "string", "enum": ["critical", "major", "minor"]},
+                        "title": {"type": "string"},
+                        "details": {"type": "string"},
+                    },
+                    "required": ["severity", "title", "details"],
+                },
+            },
+        },
+        "required": ["verdict", "findings"],
+    }
+    system_prompt = (
+        "You are a Senior QA Engineer reviewing an API specification against user stories. Your job is to find logical gaps before any code is written.\n"
+        "Focus on: Is the API complete? Can all Acceptance Criteria be met with the defined endpoints? Are there missing CRUD operations (e.g., creating a user, creating a notification)? Is the purpose of each endpoint clear?\n"
+        "Output JSON only. Be concise and actionable."
+    )
+    user_prompt = f"""
+    Product idea: {product_idea}
+    User stories: {user_stories or 'Unavailable.'}
+    Architecture Spec to review:
+    {spec_text or 'Unavailable.'}
+
+    Does this spec fully cover the user stories? Identify any critical or major gaps.
+    """
+    parsed = call_ollama_json(system_prompt, user_prompt, qa_schema, reasoning=True)
+    if not parsed:
+        return json.dumps({"verdict": "fail", "findings": [{"severity": "critical", "title": "QA Failure", "details": "Could not generate a structured QA response for the spec."}]})
+    return json.dumps(parsed, indent=2)
 
 def generate_engineering_code_from_spec(
     product_idea: str,
@@ -833,7 +883,7 @@ def generate_engineering_code_from_spec(
         "4) Include CORSMiddleware (restrain origins like ['http://localhost:8000']), health/status endpoint, and note in-memory storage is demo-only.\n"
         "5) Add validation, duplicate checks, and conflict/missing-resource handling per the spec; include parent lifecycle endpoints if referenced.\n"
         "6) Use logging inside handlers. Avoid auth/session layers and SQL unless the spec requires them; prefer simple in-memory storage.\n"
-        "7) Return raw JSON with file_name + code only (no Markdown). Guard uvicorn with if __name__ == '__main__'.\n"
+        "7) **Return raw JSON** with file_name + code only (no Markdown). Guard uvicorn with if __name__ == '__main__'.\n"
     )
     user_prompt = f"""
     Product idea: {product_idea}
@@ -884,7 +934,7 @@ def run_engineering_qa_review(
     system_prompt = (
         "You are a Senior QA Engineer reviewing a FastAPI prototype against the provided spec and user stories. "
         "Output JSON only. Focus on: schema/endpoint alignment with the spec, validation (field_validator, positive numbers, enums), "
-        "conflict/missing-resource handling, logging usage, CORS configuration, and noting demo-only storage risks. "
+        "conflict/missing-resource handling, logging usage, and correct CORS configuration. "
         "Ensure CRUD/API surfaces from the spec exist, path params match, and no extra auth/SQL is added if not required. "
         "Be concise and actionable."
     )
@@ -973,7 +1023,9 @@ def run_duckduckgo_research(product_idea: str) -> str:
 
     return "No public findings were returned for this idea."
 
+
 # --- Agent Node Functions ---
+
 def research_node(state: AgentState):
     logger.info(f"--- Node: research_node (Task ID: {state['task_id']}) ---")
     state['research_summary'] = run_research_query(state['product_idea'])
@@ -1023,37 +1075,56 @@ def ux_design_node(state: AgentState):
     return state
 
 
-def engineering_node(state: AgentState):
-    logger.info(f"--- Node: engineering_node (Task ID: {state['task_id']}) ---")
-    state['engineering_spec'] = generate_engineering_spec(
+def engineering_spec_node(state: AgentState):
+    logger.info(f"--- Node: engineering_spec_node (Task ID: {state['task_id']}) ---")
+
+    # 1. Run the architect to generate the spec
+    logger.info("... Running architect to generate spec")
+    spec = generate_engineering_spec(
         state['product_idea'],
         state.get('user_stories'),
         state.get('user_flow_diagram'),
     )
+    state['engineering_spec'] = spec
+
+    # 2. Run QA review on the generated spec
+    logger.info("... Running QA to review spec")
+    qa_review_json = run_spec_qa_review(
+        state['product_idea'],
+        state.get('user_stories'),
+        spec,
+    )
+    state['engineering_spec_qa'] = qa_review_json
+
+    # 3. Set status for HITL approval
+    state['status'] = "pending_spec_approval"
+    state['pending_approval_content'] = (
+        "Architect has produced an API specification and QA has reviewed it. "
+        "Approve to proceed to implementation."
+    )
+    return state
+
+
+def developer_node(state: AgentState):
+    logger.info(f"--- Node: developer_node (Task ID: {state['task_id']}) ---")
     file_name, code = generate_engineering_code_from_spec(
         state['product_idea'],
         state.get('user_stories'),
         state.get('wireframe_html'),
         state.get('engineering_spec'),
     )
-    state['engineering_file_name'] = file_name
-    state['engineering_code'] = code
-    state['engineering_qa'] = run_engineering_qa_review(
-        state['product_idea'],
-        state.get('user_stories'),
-        state.get('engineering_spec'),
-        state.get('engineering_code'),
-    )
+    state['engineering_file_name'] = file_name or "main.py"
+    state['engineering_code'] = code or "# Code generation failed"
     state['status'] = "pending_engineering_bundle_approval"
     state['pending_approval_content'] = (
-        "Review the engineering bundle (spec, code, QA). Approve to hand off to GTM."
+        "Developer has implemented the spec. Review the code and approve to complete."
     )
     return state
 
 
 def approved_node(state: AgentState):
     logger.info(f"--- Node: approved_node (Task ID: {state['task_id']}) ---")
-    state['status'] = "ready_for_gtm"
+    state['status'] = "completed"
     state['pending_approval_content'] = None
     return state
 
@@ -1064,14 +1135,16 @@ workflow.add_node("research", research_node)
 workflow.add_node("product_prd", product_prd_node)
 workflow.add_node("product_stories", product_stories_node)
 workflow.add_node("ux_design", ux_design_node)
-workflow.add_node("engineering", engineering_node)
+workflow.add_node("engineering_spec", engineering_spec_node)
+workflow.add_node("developer", developer_node)
 workflow.add_node("approved", approved_node)
 workflow.set_entry_point("research")
 workflow.add_edge("research", "product_prd")
 workflow.add_edge("product_prd", "product_stories")
 workflow.add_edge("product_stories", "ux_design")
-workflow.add_edge("ux_design", "engineering")
-workflow.add_edge("engineering", "approved")
+workflow.add_edge("ux_design", "engineering_spec")
+workflow.add_edge("engineering_spec", "developer")
+workflow.add_edge("developer", "approved")
 workflow.add_edge("approved", END)
 
 
@@ -1087,7 +1160,8 @@ async def initialize_graph():
             "product_prd",
             "product_stories",
             "ux_design",
-            "engineering",
+            "engineering_spec",
+            "developer",
             "approved",
         ],
     )
@@ -1136,6 +1210,7 @@ class TaskStatus(BaseModel):
     engineering_spec: Optional[str] = None
     engineering_file_name: Optional[str] = None
     engineering_code: Optional[str] = None
+    engineering_spec_qa: Optional[str] = None
     engineering_qa: Optional[str] = None
     last_rejected_step: Optional[str] = None
     last_rejected_at: Optional[str] = None
@@ -1163,7 +1238,7 @@ class RespondToApprovalRequest(BaseModel):
 
 class ResubmitRequest(BaseModel):
     task_id: str
-    step: str  # e.g., research, product_prd, product_stories, ux_design, engineering, qa_review
+    step: str  # e.g., research, product_prd, product_stories, ux_design, spec, developer
 
 
 PENDING_STATUSES = {
@@ -1171,6 +1246,7 @@ PENDING_STATUSES = {
     "pending_prd_approval",
     "pending_story_approval",
     "pending_ux_approval",
+    "pending_spec_approval",
     "pending_engineering_bundle_approval",
     "pending_approval",
 }
@@ -1195,6 +1271,7 @@ def apply_artifact_overrides(task_id: str, overrides: ArtifactUpdate, db: Sessio
         "engineering_spec",
         "engineering_file_name",
         "engineering_code",
+        "engineering_spec_qa",
         "engineering_qa",
     ):
         value = getattr(overrides, field)
@@ -1212,13 +1289,14 @@ STEP_STATUS_MAP = {
     "product_prd": "pending_prd_approval",
     "product_stories": "pending_story_approval",
     "ux_design": "pending_ux_approval",
+    "spec": "pending_spec_approval",
     "engineering": "pending_engineering_bundle_approval",
 }
 
 
 def clear_artifacts_for_step(db_task: Task, step: str):
     """Drop artifacts at and after the specified step so regeneration is clean."""
-    downstream_fields = {
+    downstream_fields: dict[str, list[str]] = {
         "research": [
             "research_summary",
             "prd_summary",
@@ -1226,6 +1304,7 @@ def clear_artifacts_for_step(db_task: Task, step: str):
             "user_flow_diagram",
             "wireframe_html",
             "engineering_spec",
+            "engineering_spec_qa",
             "engineering_file_name",
             "engineering_code",
             "engineering_qa",
@@ -1236,6 +1315,7 @@ def clear_artifacts_for_step(db_task: Task, step: str):
             "user_flow_diagram",
             "wireframe_html",
             "engineering_spec",
+            "engineering_spec_qa",
             "engineering_file_name",
             "engineering_code",
             "engineering_qa",
@@ -1245,6 +1325,7 @@ def clear_artifacts_for_step(db_task: Task, step: str):
             "user_flow_diagram",
             "wireframe_html",
             "engineering_spec",
+            "engineering_spec_qa",
             "engineering_file_name",
             "engineering_code",
             "engineering_qa",
@@ -1255,11 +1336,20 @@ def clear_artifacts_for_step(db_task: Task, step: str):
             "engineering_file_name",
             "engineering_spec",
             "engineering_file_name",
+            "engineering_spec_qa",
+            "engineering_code",
+            "engineering_qa",
+        ],
+        "spec": [
+            "engineering_spec",
+            "engineering_spec_qa",
+            "engineering_file_name",
             "engineering_code",
             "engineering_qa",
         ],
         "engineering": [
             "engineering_spec",
+            "engineering_spec_qa",
             "engineering_file_name",
             "engineering_code",
             "engineering_qa",
@@ -1278,6 +1368,7 @@ def status_to_step(status: str | None) -> Optional[str]:
         "pending_prd_approval": "product_prd",
         "pending_story_approval": "product_stories",
         "pending_ux_approval": "ux_design",
+        "pending_spec_approval": "spec",
         "pending_engineering_bundle_approval": "engineering",
     }
     return inverse.get(status)
@@ -1295,6 +1386,7 @@ def build_state_from_task(db_task: Task) -> AgentState:
         "user_flow_diagram": db_task.user_flow_diagram,
         "wireframe_html": db_task.wireframe_html,
         "engineering_spec": db_task.engineering_spec,
+        "engineering_spec_qa": db_task.engineering_spec_qa,
         "engineering_file_name": db_task.engineering_file_name,
         "engineering_code": db_task.engineering_code,
         "engineering_qa": db_task.engineering_qa,
@@ -1331,6 +1423,7 @@ async def start_task(request: StartTaskRequest, db: Session = Depends(get_db)):
         user_flow_diagram=None,
         wireframe_html=None,
         engineering_spec=None,
+        engineering_spec_qa=None,
         engineering_file_name=None,
         engineering_code=None,
         engineering_qa=None,
@@ -1357,6 +1450,7 @@ async def start_task(request: StartTaskRequest, db: Session = Depends(get_db)):
     db_task.user_flow_diagram = interrupted_state.values.get('user_flow_diagram')
     db_task.wireframe_html = interrupted_state.values.get('wireframe_html')
     db_task.engineering_spec = interrupted_state.values.get('engineering_spec')
+    db_task.engineering_spec_qa = interrupted_state.values.get('engineering_spec_qa')
     db_task.engineering_file_name = interrupted_state.values.get('engineering_file_name')
     db_task.engineering_code = interrupted_state.values.get('engineering_code')
     db_task.engineering_qa = interrupted_state.values.get('engineering_qa')
@@ -1375,6 +1469,7 @@ def get_pending_approval(db: Session = Depends(get_db)):
         "pending_prd_approval",
         "pending_story_approval",
         "pending_ux_approval",
+        "pending_spec_approval",
         "pending_engineering_bundle_approval",
         "pending_approval",  # backward compatibility
     ]
@@ -1416,6 +1511,7 @@ def export_tasks(db: Session = Depends(get_db)):
             "User Flow Diagram",
             "Wireframe HTML",
             "Engineering Spec",
+            "Engineering Spec QA",
             "Engineering File Name",
             "Engineering Code",
             "Engineering QA",
@@ -1436,6 +1532,7 @@ def export_tasks(db: Session = Depends(get_db)):
                 task.user_flow_diagram or "",
                 task.wireframe_html or "",
                 task.engineering_spec or "",
+                task.engineering_spec_qa or "",
                 task.engineering_file_name or "",
                 task.engineering_code or "",
                 task.engineering_qa or "",
@@ -1458,6 +1555,7 @@ async def respond_to_approval(request: RespondToApprovalRequest, db: Session = D
         "pending_prd_approval",
         "pending_story_approval",
         "pending_ux_approval",
+        "pending_spec_approval",
         "pending_engineering_bundle_approval",
         "pending_approval",
     }
@@ -1496,6 +1594,7 @@ async def respond_to_approval(request: RespondToApprovalRequest, db: Session = D
         'user_flow_diagram',
         'wireframe_html',
         'engineering_spec',
+        'engineering_spec_qa',
         'engineering_file_name',
         'engineering_code',
         'engineering_qa',
@@ -1512,7 +1611,7 @@ async def respond_to_approval(request: RespondToApprovalRequest, db: Session = D
 
 @app.post("/resubmit_step", response_model=TaskStatus)
 async def resubmit_step(request: ResubmitRequest, db: Session = Depends(get_db)):
-    allowed_steps = set(STEP_STATUS_MAP.keys())
+    allowed_steps = set(STEP_STATUS_MAP.keys()) | {"spec"}
     if request.step not in allowed_steps:
         raise HTTPException(status_code=400, detail="Invalid step for resubmission.")
 
@@ -1534,7 +1633,8 @@ async def resubmit_step(request: ResubmitRequest, db: Session = Depends(get_db))
         "product_prd": product_prd_node,
         "product_stories": product_stories_node,
         "ux_design": ux_design_node,
-        "engineering": engineering_node,
+        "spec": engineering_spec_node,
+        "developer": developer_node,
     }
     step_fn = step_fn_map.get(request.step)
     if not step_fn:
@@ -1549,6 +1649,7 @@ async def resubmit_step(request: ResubmitRequest, db: Session = Depends(get_db))
     db_task.user_flow_diagram = updated_state.get("user_flow_diagram")
     db_task.wireframe_html = updated_state.get("wireframe_html")
     db_task.engineering_spec = updated_state.get("engineering_spec")
+    db_task.engineering_spec_qa = updated_state.get("engineering_spec_qa")
     db_task.engineering_file_name = updated_state.get("engineering_file_name")
     db_task.engineering_code = updated_state.get("engineering_code")
     db_task.engineering_qa = updated_state.get("engineering_qa")
@@ -1578,6 +1679,7 @@ def get_next_status(current_status: Optional[str]) -> Optional[str]:
         "pending_prd_approval",
         "pending_story_approval",
         "pending_ux_approval",
+        "pending_spec_approval",
         "pending_engineering_bundle_approval",
         "ready_for_gtm",
         "completed",

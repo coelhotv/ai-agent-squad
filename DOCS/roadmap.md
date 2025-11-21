@@ -43,9 +43,10 @@ Now we can let humans edit every artifact before approving it so they can improv
 
 ### Phase 5 – Build Sprint (✅)
 
-- Engineering runs as a bundle: spec (schemas + endpoints), code generation, and QA review in one HITL step.
-- Approvers see the spec, code, and QA output together at `pending_engineering_bundle_approval`; edits/resubmits rerun the bundle.
-- New artifacts (`engineering_spec`, `engineering_code`, `engineering_qa`) are rendered in the UI and exported via `/tasks/export`.
+- Engineering now runs as a two-step process for higher quality.
+- **Step 1 (Spec):** An Architect agent generates an API spec, which is immediately reviewed by a QA agent. This bundle is presented for HITL approval at `pending_spec_approval`.
+- **Step 2 (Code):** After spec approval, a Developer agent generates the code, which is presented for final approval at `pending_engineering_bundle_approval`.
+- New artifacts (`engineering_spec`, `engineering_spec_qa`, `engineering_code`) are rendered in the UI and exported.
 
 ## In Progress
 
