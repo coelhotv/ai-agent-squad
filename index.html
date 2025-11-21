@@ -520,7 +520,7 @@
                     <summary>Engineering Prototype</summary>
                     <div class="artifact-row">
                         <div style="flex:1; min-width:0;">
-                            <p id="engineering-filename">No prototype yet.</p>
+                            <!-- <p id="engineering-filename">No prototype yet.</p> -->
                             <pre id="engineering-code">No prototype yet.</pre>
                         </div>
                         <button class="edit-btn" type="button" data-artifact="engineering_code">Edit</button>
@@ -892,7 +892,7 @@
         function renderEngineeringPrototype(fileName, codeText) {
             const resolvedName = fileName?.trim();
             const resolvedCode = codeText?.trim();
-            engineeringFileName.textContent = resolvedName ? `File: ${resolvedName}` : 'No prototype yet.';
+            // engineeringFileName.textContent = resolvedName ? `File: ${resolvedName}` : 'No prototype yet.';
             engineeringCode.textContent = resolvedCode || 'No prototype yet.';
         }
 

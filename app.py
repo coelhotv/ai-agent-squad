@@ -741,74 +741,58 @@ def generate_engineering_spec(
     spec_schema = {
         "type": "object",
         "properties": {
-            "overview": {
-            "type": "string",
-            "description": "A brief high-level summary of the architecture choice."
-            },
-            "database_models": {
-            "type": "array",
-            "description": "List of Pydantic models representing the data.",
-            "items": {
-                "type": "object",
-                "properties": {
-                "name": { "type": "string", "description": "Class name, e.g., 'User'" },
-                "fields": {
-                    "type": "array",
-                    "items": {
+            "schemas": {
+                "type": "array",
+                "items": {
                     "type": "object",
                     "properties": {
-                        "name": { "type": "string" },
-                        "type": { "type": "string", "description": "Python type, e.g., 'str', 'int', 'datetime'" },
-                        "constraints": { "type": "string", "description": "e.g., 'gt=0', 'optional', 'unique'" }
+                        "name": {"type": "string"},
+                        "fields": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "name": {"type": "string"},
+                                    "type": {"type": "string"},
+                                    "required": {"type": "boolean"},
+                                    "validators": {"type": "array", "items": {"type": "string"}},
+                                },
+                                "required": ["name", "type", "required"],
+                            },
+                        },
                     },
-                    "required": ["name", "type"]
-                    }
-                }
+                    "required": ["name", "fields"],
                 },
-                "required": ["name", "fields"]
-            }
             },
-            "api_endpoints": {
-            "type": "array",
-            "description": "List of API routes to implement.",
-            "items": {
-                "type": "object",
-                "properties": {
-                "method": {
-                    "type": "string",
-                    "enum": ["GET", "POST", "PUT", "DELETE", "PATCH"],
-                    "description": "HTTP Method"
+            "endpoints": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "method": {"type": "string"},
+                        "path": {"type": "string"},
+                        "path_params": {"type": "array", "items": {"type": "string"}},
+                        "query_params": {"type": "array", "items": {"type": "string"}},
+                        "body_model": {"type": ["string", "null"]},
+                        "response_model": {"type": "string"},
+                        "errors": {"type": "array", "items": {"type": "string"}},
+                    },
+                    "required": ["method", "path", "response_model"],
                 },
-                "path": { "type": "string", "description": "URL path, e.g., '/users/{id}'" },
-                "summary": { "type": "string", "description": "What this endpoint does." },
-                "request_body_model": {
-                    "type": ["string", "null"],
-                    "description": "The Pydantic model name used for the input body. NULL if GET/DELETE."
-                },
-                "response_model": {
-                    "type": "string",
-                    "description": "The Pydantic model name returned."
-                }
-                },
-                "required": ["method", "path", "summary", "response_model"]
-            }
-            }
+            },
         },
-        "required": ["database_models", "api_endpoints"]
+        "required": ["schemas", "endpoints"],
     }
-    system_prompt = """"
-        You are a Senior Software Architect specializing in FastAPI and Pydantic v2.
-        Your goal is to design a robust backend API structure based on User Stories/AC and Mermaid flow.
-
-        CRITICAL DESIGN RULES:
-        1. **Coverage:** You must design schema and endpoints to cover the initial two (1 & 2) User Stories/AC + flow provided.
-        2. **HTTP Semantics:** For any creation or update (POST/PUT), you MUST specify a `request_body_model`. Do NOT design APIs that use Query parameters for inserting data.
-        3. **Data Integrity:** Define strict constraints for your models (e.g., positive numbers for counts, required fields).
-        4. **Separation:** Create distinct models for Requests (Input) and Responses (Output) if necessary to hide internal IDs or computed fields.
-        5. **Conflict Handling:** Ensure paths include all parameters and plan conflict/missing-resource handling.
-        
-        **Do NOT write implementation logic — only the interface.**
-    """
+    system_prompt = (
+        "You are a Senior Software Architect specializing in FastAPI, Pydantic v2, and uvicorn.\n"
+        "Review the user stories/AC and propose the interface contract.\n"
+        "Output JSON matching the provided schema exactly:\n"
+        "- schemas: Pydantic v2 models (name, fields with types/required/validators using field_validator terminology).\n"
+        "- endpoints: method, path, params, body/response models, error cases. Paths must include all parameters.\n"
+        "Include parent lifecycle endpoints if referenced (e.g., users/teams). Plan conflict/missing-resource handling.\n"
+        "Your interface contract must cover ONLY the initial two (1 & 2) User Stories/AC + flow provided.\n"
+        "Do NOT write implementation logic."
+    )
     user_prompt = f"""
     Product idea: {product_idea}
     
@@ -840,23 +824,17 @@ def generate_engineering_code_from_spec(
         },
         "required": ["file_name", "code"]
     }
-    system_prompt = """
-        You are an Expert Python Developer.
-        Your task is to generate a single-file FastAPI application that implements the provided Architecture Plan EXACTLY.
-        User stories and wireframe are provided for context only.
-
-        IMPLEMENTATION RULES:
-        1. **Strict Adherence:** Implement every model and endpoint defined in the Architecture Plan. Do not skip any.
-        2. **Pydantic V2:** Use `model_validator` or `field_validator` for constraints. Use `BaseModel`.
-        3. **FastAPI Best Practices:**
-        - Use `CORSMiddleware` allowing ["*"] (restrain origins e.g., ['http://localhost:8000']).
-        - Use `logging` to track request activity in handlers, health/status endpoint, and note in-memory storage is for demo only..
-        - Ensure `if __name__ == "__main__":` block is present.
-        4. Use JSON bodies for POST/PUT/PATCH. Align path params in decorators and signatures.
-        5. **No Hallucinations:** Do not add features not requested in the plan.
-        6. Return only JSON as specified in the schema, with file_name + code only (no Markdown).
-
-    """
+    system_prompt = (
+        "You are a Senior Python Engineer. Implement the provided spec in a single-file FastAPI app.\n"
+        "RULES:\n"
+        "1) Implement every model/endpoint from the spec; do not add extra features.\n"
+        "2) Use FastAPI + Pydantic v2 (`field_validator`/`BaseModel`), built-in generics, and uvicorn.\n"
+        "3) Use JSON bodies for POST/PUT/PATCH. Align path params in decorators/signatures.\n"
+        "4) Include CORSMiddleware (restrain origins like ['http://localhost:8000']), health/status endpoint, and note in-memory storage is demo-only.\n"
+        "5) Add validation, duplicate checks, and conflict/missing-resource handling per the spec; include parent lifecycle endpoints if referenced.\n"
+        "6) Use logging inside handlers. Avoid auth/session layers and SQL unless the spec requires them; prefer simple in-memory storage.\n"
+        "7) Return raw JSON with file_name + code only (no Markdown). Guard uvicorn with if __name__ == '__main__'.\n"
+    )
     user_prompt = f"""
     Product idea: {product_idea}
     
@@ -907,7 +885,7 @@ def run_engineering_qa_review(
         "You are a Senior QA Engineer reviewing a FastAPI prototype against the provided spec and user stories. "
         "Output JSON only. Focus on: schema/endpoint alignment with the spec, validation (field_validator, positive numbers, enums), "
         "conflict/missing-resource handling, logging usage, CORS configuration, and noting demo-only storage risks. "
-        "Coverage of at least the first user story is required. "
+        "Ensure CRUD/API surfaces from the spec exist, path params match, and no extra auth/SQL is added if not required. "
         "Be concise and actionable."
     )
     user_prompt = f"""
