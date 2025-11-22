@@ -17,6 +17,7 @@ docker-compose.yml.override
 # Local files
 .env
 .DS_Store
+local_url.txt
 
 # IDE / Editor
 .vscode/
