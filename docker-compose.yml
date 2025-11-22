@@ -4,7 +4,7 @@ services:
   app:
     build: .
     container_name: app_service
-    command: uvicorn app:app --host 0.0.0.0 --port 8000 --reload
+    command: python app.py
     volumes:
       - .:/code # For code hot-reloading
       - app_data:/data # For persistent data like databases

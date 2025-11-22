@@ -1823,39 +1823,27 @@ def get_next_status(current_status: Optional[str]) -> Optional[str]:
     return current_status
 
 
-def get_local_ip():
-    """
-    Finds the local IP address of the machine.
-    Connects to a public DNS server to find the primary network interface.
-    """
-    s = None
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        # Doesn't actually send data, just opens a socket to determine the route
-        s.connect(("8.8.8.8", 80))
-        ip = s.getsockname()[0]
-        return ip
-    except Exception:
-        logger.warning("Could not determine local IP address. Defaulting to localhost.")
-        return "127.0.0.1"
-    finally:
-        if s:
-            s.close()
-
-
 if __name__ == "__main__":
     host = "127.0.0.1"
     port = 8000
 
     if settings.run_locally:
         host = "0.0.0.0"
-        local_ip = get_local_ip()
-        local_url = f"http://{local_ip}:{port}"
-        logger.info(f"🚀 App is configured to run on the local network.")
-        logger.info(f"🚀 Access the UI from other devices at: {local_url}")
+        # When running in Docker, the host is 0.0.0.0, but the accessible IP is the host's IP.
+        # The container can't know the host's IP, so we provide instructions.
+        local_url_message = (
+            f"🚀 App is accessible on your local network. Find your computer's local IP address "
+            f"(e.g., by running 'ifconfig' or 'ip addr') and access the app at http://<YOUR_LOCAL_IP>:{port}"
+        )
+        logger.info(local_url_message)
         with open("local_url.txt", "w") as f:
-            f.write(local_url)
+            f.write(f"Access the app on your local network at http://<YOUR_LOCAL_IP>:{port}\n")
     else:
         logger.info("🚀 App is configured to run locally only. Access at http://127.0.0.1:8000")
 
-    uvicorn.run(app, host=host, port=port)
+    if settings.run_locally:
+        # When reload is True, uvicorn needs an import string to be able to re-import the app.
+        uvicorn.run("app:app", host=host, port=port, reload=True)
+    else:
+        # When not reloading, we can pass the app object directly.
+        uvicorn.run(app, host=host, port=port, reload=False)

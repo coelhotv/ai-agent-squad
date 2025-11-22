@@ -1,0 +1,1 @@
+Access the app on your local network at http://192.168.0.246:8000
