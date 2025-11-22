@@ -834,7 +834,7 @@ def generate_engineering_spec(
     )
     contract_user_prompt = f"""
     Architect's Plan (Reasoning Steps):
-    {reasoning_steps}
+    - {"- ".join(reasoning_steps)}
 
     {'Previous attempt QA feedback: ' + qa_feedback if qa_feedback else ''}
     
@@ -907,26 +907,11 @@ def run_spec_qa_review(
     """
     # Use the REASONING model for this logical review task.
     parsed = call_ollama_json(system_prompt, user_prompt, qa_schema, reasoning=True)
-    parsed = call_ollama_json(system_prompt, user_prompt, qa_schema, reasoning=True)
     if not parsed:
         return json.dumps({"verdict": "fail", "findings": [{"severity": "critical", "title": "QA Failure", "details": "Could not generate a structured QA response for the spec."}] }, indent=2)
-    lines = [f"Verdict: {parsed.get('verdict', 'unknown')}"]
-    findings = parsed.get("findings") or []
-    if findings:
-        lines.append("Findings:")
-        for finding in findings:
-            sev = finding.get("severity") or "info"
-            title = finding.get("title") or "Issue"
-            details = finding.get("details") or ""
-            lines.append(f"- [{sev}] {title}: {details}")
-    recs = parsed.get("recommendations") or []
-    if recs:
-        lines.append("Recommendations:")
-        for rec in recs:
-            lines.append(f"- {rec}")
-    return "\n".join(lines).strip()
+    return json.dumps(parsed, indent=2)
 
-def generate_engineering_code(
+def generate_engineering_code_from_spec(
     product_idea: str,
     user_stories: str | None,
     wireframe_html: str | None,
@@ -942,15 +927,14 @@ def generate_engineering_code(
     }
     system_prompt = (
         "You are a Senior Python Engineer. Your task is to implement a **demo-only prototype** from a spec into a single-file FastAPI app.\n"
-        "## RULES:\n"
-        "1.  **Prototype Scope**: Use in-memory storage (e.g., a Python dictionary). DO NOT use databases. Simulate a single user (e.g., `current_user_id = 'demo'`).\n"
-        "2.  **Spec Adherence**: Implement the Pydantic models and FastAPI endpoints *exactly* as defined in the spec. Do not add extra features.\n"
-        "3.  **Correct Imports**: Ensure all necessary modules are imported (e.g., `Enum` from `enum`, `List` from `typing`, `date` from `datetime`).\n"
-        "4.  **Async Correctness**: Any endpoint that uses `await request.json()` or another `await` call MUST be defined with `async def`.\n"
-        "5.  **Unique IDs**: When storing items in a list, they must have a unique ID. Do NOT use the list index as an ID. If the spec is missing an ID field in a model, add one (e.g., `id: str = Field(default_factory=lambda: str(uuid.uuid4()))`).\n"
-        "6.  **Logical Completeness**: If the spec includes an endpoint to get an item by ID (e.g., `/items/{item_id}`), you MUST also implement a `GET /items` endpoint to list all items so the IDs can be discovered.\n"
-        "7.  **Single File**: The entire application must be in a single, runnable Python file named `main.py`.\n"
-        "8.  **Output Format**: Return raw JSON with `file_name` and `code` only. Guard the uvicorn runner with `if __name__ == '__main__':`."
+        "RULES:\n"
+        "1. **Prototype Scope**: Implement using **in-memory storage** (e.g., a Python dictionary `DB = {}`). DO NOT use databases (like SQLAlchemy) or file storage.\n"
+        "2. **Simulated Auth**: DO NOT implement a real login system. If user-specific routes are needed, you can simulate it by hardcoding a user ID (e.g., `current_user_id = 'user123'`).\n"
+        "3. **Spec Adherence**: Implement *only* the models and endpoints from the spec. Do not add extra features or endpoints.\n"
+        "4. **Single File**: The entire application must be in a single, runnable Python file.\n"
+        "5. **Core Tech**: Use FastAPI, Pydantic v2, and standard Python libraries. Include basic CORSMiddleware for a frontend to connect.\n"
+        "6. **Keep it Simple**: Add basic logging in handlers, but avoid complex error handling, background tasks, or other production features.\n"
+        "7. **Output Format**: Return raw JSON with `file_name` and `code` only. Guard the uvicorn runner with `if __name__ == '__main__':`."
     )
     user_prompt = f"""
     Product idea: {product_idea}
@@ -987,10 +971,7 @@ def run_engineering_qa_review(
                 "items": {
                     "type": "object",
                     "properties": {
-                        "severity": {
-                            "type": "string",
-                            "enum": ["critical", "major", "minor"],
-                        },
+                        "severity": {"type": "string"},
                         "title": {"type": "string"},
                         "details": {"type": "string"},
                     },
@@ -1007,7 +988,7 @@ def run_engineering_qa_review(
         "1. **Primary Goal**: Does the code implement all schemas and endpoints from the spec? This is the main reason to 'fail' the code.\n"
         "2. **Prototype Scope**: The code *should* use in-memory storage (like a dictionary) and have no real authentication. DO NOT flag these as issues.\n"
         "3. **What to Check**: Focus on correct Pydantic models, endpoint paths and methods matching the spec, and basic error handling (like returning a 404 for a missing item).\n"
-        "4. **Be Concise**: Keep findings brief and actionable. Keep the 'details' for each finding to one or two short sentences.\n"
+        "4. **Be Concise**: Keep findings brief and actionable.\n"
         "5. **Output JSON**: Your entire response must be in the specified JSON format."
     )
     user_prompt = f"""
@@ -1018,9 +999,9 @@ def run_engineering_qa_review(
     Prototype code to review:
     {engineering_code or 'Unavailable.'}
     """
-    parsed = call_ollama_json(system_prompt, user_prompt, qa_schema, reasoning=True)
+    parsed = call_ollama_json(system_prompt, user_prompt, qa_schema)
     if not parsed:
-        return json.dumps({"verdict": "fail", "findings": [{"severity": "critical", "title": "QA Failure", "details": "Could not generate a structured QA response for the spec."}] }, indent=2)
+        return "QA review unavailable. No structured response returned."
     lines = [f"Verdict: {parsed.get('verdict', 'unknown')}"]
     findings = parsed.get("findings") or []
     if findings:
@@ -1149,6 +1130,49 @@ def ux_design_node(state: AgentState):
 
 def engineering_spec_node(state: AgentState):
     logger.info(f"--- Node: engineering_spec_node (Task ID: {state['task_id']}) ---")
+
+    max_retries = 1
+    qa_feedback = "" # Store feedback for retries
+    for attempt in range(max_retries):
+        # 1. Run the architect to generate the spec
+        logger.info(f"... Running architect to generate spec (Attempt {attempt + 1}/{max_retries})")
+        spec = generate_engineering_spec(
+            state['product_idea'],
+            state.get('user_stories'),
+            state.get('qa_feedback'),
+            # On retries, include the QA feedback
+            # qa_feedback, 
+        )
+        state['engineering_spec'] = spec
+
+        # 2. Run QA review on the generated spec
+        logger.info("... Running QA to review spec")
+        qa_review_json = run_spec_qa_review(
+            state['product_idea'],
+            state.get('user_stories'),
+            spec,
+        )
+        state['engineering_spec_qa'] = qa_review_json
+        review = json.loads(qa_review_json)
+
+        # 3. Check the verdict
+        if review.get("verdict") == "pass":
+            logger.info("... QA spec review passed. Proceeding to HITL approval.")
+            state['status'] = "pending_spec_approval"
+            state['pending_approval_content'] = (
+                "Architect has produced an API specification and QA has reviewed it. "
+                "Approve to proceed to implementation."
+            )
+            return state
+        
+        logger.warning(f"... QA spec review failed. Findings: {review.get('findings')}")
+        # If it fails, format the findings to be included in the next prompt.
+        findings = review.get("findings", [])
+        if findings:
+            feedback_points = [f"- {f.get('title')}: {f.get('details')}" for f in findings]
+            qa_feedback = "The previous spec failed QA. Address these critical issues:\n" + "\n".join(feedback_points)
+
+    logger.error("... Max retries reached for spec generation. Failing for HITL.")
     # The retry loop with QA has been removed as the architect is now reliable
     # and the QA agent has become unstable. We will now generate the spec once
     # and send it directly for human approval.
@@ -1159,25 +1183,16 @@ def engineering_spec_node(state: AgentState):
         # No longer passing QA feedback
     )
     state['engineering_spec'] = spec
-
+    # We still run the QA review, but only for human visibility, not for a loop.
     logger.info("... Running QA to review spec for human review.")
-    spec_contract = ""
-    if spec:
-        try:
-            full_spec = json.loads(spec)
-            contract_only = {"schemas": full_spec.get("schemas", []), "endpoints": full_spec.get("endpoints", [])}
-            spec_contract = json.dumps(contract_only, indent=2)
-        except (json.JSONDecodeError, TypeError):
-            logger.warning("Could not parse engineering_spec to extract contract. Passing full spec.")
-            spec_contract = spec
-
     qa_review_json = run_spec_qa_review(
         state['product_idea'],
         state.get('user_stories'),
-        spec_contract,
+        spec,
     )
     state['engineering_spec_qa'] = qa_review_json
     state['status'] = "pending_spec_approval"
+    state['pending_approval_content'] = "Spec generation failed after multiple QA reviews. Manual intervention required."
     state['pending_approval_content'] = (
         "Architect has produced an API specification. "
         "Review the spec and the QA report, then approve to proceed to implementation."
@@ -1185,25 +1200,13 @@ def engineering_spec_node(state: AgentState):
     return state
 
 
-def engineering_node(state: AgentState):
-    logger.info(f"--- Node: engineering_node (Task ID: {state['task_id']}) ---")
-
-    # Extract only the contract (schemas and endpoints) from the full spec.
-    # This gives the developer agent a clean, unambiguous source of truth.
-    spec_contract = ""
-    if state['engineering_spec']:
-        try:
-            full_spec = json.loads(state['engineering_spec'])
-            contract_only = {"schemas": full_spec.get("schemas", []), "endpoints": full_spec.get("endpoints", [])}
-            spec_contract = json.dumps(contract_only, indent=2)
-        except (json.JSONDecodeError, TypeError):
-            logger.warning("Could not parse engineering_spec to extract contract. Passing full spec.")
-            spec_contract = state['engineering_spec']
-
-    file_name, code = generate_engineering_code(
+def developer_node(state: AgentState):
+    logger.info(f"--- Node: developer_node (Task ID: {state['task_id']}) ---")
+    file_name, code = generate_engineering_code_from_spec(
         state['product_idea'],
         state.get('user_stories'),
-        spec_contract, # Pass only the contract
+        state.get('wireframe_html'),
+        state.get('engineering_spec'),
     )
     state['engineering_file_name'] = file_name or "main.py"
     state['engineering_code'] = code or "# Code generation failed"
@@ -1212,7 +1215,7 @@ def engineering_node(state: AgentState):
     qa_review = run_engineering_qa_review(
         state['product_idea'],
         state.get('user_stories'),
-        spec_contract, # Pass only the contract to QA as well
+        state.get('engineering_spec'),
         code,
     )
     state['engineering_qa'] = qa_review or "QA review failed"
@@ -1238,15 +1241,15 @@ workflow.add_node("product_prd", product_prd_node)
 workflow.add_node("product_stories", product_stories_node)
 workflow.add_node("ux_design", ux_design_node)
 workflow.add_node("engineering_spec", engineering_spec_node)
-workflow.add_node("engineering", engineering_node)
+workflow.add_node("developer", developer_node)
 workflow.add_node("approved", approved_node)
 workflow.set_entry_point("research")
 workflow.add_edge("research", "product_prd")
 workflow.add_edge("product_prd", "product_stories")
 workflow.add_edge("product_stories", "ux_design")
 workflow.add_edge("ux_design", "engineering_spec")
-workflow.add_edge("engineering_spec", "engineering")
-workflow.add_edge("engineering", "approved")
+workflow.add_edge("engineering_spec", "developer")
+workflow.add_edge("developer", "approved")
 workflow.add_edge("approved", END)
 
 
@@ -1263,7 +1266,7 @@ async def initialize_graph():
             "product_stories",
             "ux_design",
             "engineering_spec",
-            "engineering",
+            "developer",
             "approved",
         ],
     )
@@ -1319,22 +1322,29 @@ class TaskStatus(BaseModel):
     class Config:
         from_attributes = True
 
-
-class ArtifactUpdateRequest(BaseModel):
+class ArtifactUpdate(BaseModel):
     task_id: str
-    artifact_name: str
-    content: str
+    research_summary: Optional[str] = None
+    prd_summary: Optional[str] = None
+    user_stories: Optional[str] = None
+    user_flow_diagram: Optional[str] = None
+    wireframe_html: Optional[str] = None
+    engineering_spec: Optional[str] = None
+    engineering_spec_qa: Optional[str] = None
+    engineering_file_name: Optional[str] = None
+    engineering_code: Optional[str] = None
+    engineering_qa: Optional[str] = None
 
 
 class RespondToApprovalRequest(BaseModel):
     task_id: str
     approved: bool
-    overrides: dict[str, str] | None = None
+    overrides: ArtifactUpdate | None = None
 
 
 class ResubmitRequest(BaseModel):
     task_id: str
-    step: str  # e.g., research, product_prd, product_stories, ux_design, engineering_spec, engineering_code
+    step: str  # e.g., research, product_prd, product_stories, ux_design, spec, developer
 
 
 PENDING_STATUSES = {
@@ -1348,13 +1358,45 @@ PENDING_STATUSES = {
 }
 
 
+def apply_artifact_overrides(task_id: str, overrides: ArtifactUpdate, db: Session):
+    db_task = db.query(Task).filter(Task.task_id == task_id).first()
+    if not db_task:
+        raise HTTPException(status_code=404, detail="Task not found.")
+    if db_task.status not in PENDING_STATUSES:
+        raise HTTPException(
+            status_code=400,
+            detail="Artifacts can only be edited while the task is pending approval.",
+        )
+    updated = False
+    for field in (
+        "research_summary",
+        "prd_summary",
+        "user_stories",
+        "user_flow_diagram",
+        "wireframe_html",
+        "engineering_spec",
+        "engineering_spec_qa",
+        "engineering_file_name",
+        "engineering_code",
+        "engineering_qa",
+    ):
+        value = getattr(overrides, field)
+        if value is not None:
+            setattr(db_task, field, value)
+            updated = True
+    if updated:
+        db.commit()
+        db.refresh(db_task)
+    return db_task
+
+
 STEP_STATUS_MAP = {
     "research": "pending_research_approval",
     "product_prd": "pending_prd_approval",
     "product_stories": "pending_story_approval",
     "ux_design": "pending_ux_approval",
-    "engineering_spec": "pending_spec_approval",
-    "engineering_code": "pending_code_approval",
+    "spec": "pending_spec_approval",
+    "engineering": "pending_code_approval",
 }
 
 
@@ -1404,14 +1446,14 @@ def clear_artifacts_for_step(db_task: Task, step: str):
             "engineering_code",
             "engineering_qa",
         ],
-        "engineering_spec": [
+        "spec": [
             "engineering_spec",
             "engineering_spec_qa",
             "engineering_file_name",
             "engineering_code",
             "engineering_qa",
         ],
-        "engineering_code": [
+        "engineering": [
             "engineering_file_name",
             "engineering_code",
             "engineering_qa",
@@ -1430,8 +1472,8 @@ def status_to_step(status: str | None) -> Optional[str]:
         "pending_prd_approval": "product_prd",
         "pending_story_approval": "product_stories",
         "pending_ux_approval": "ux_design",
-        "pending_spec_approval": "engineering_spec",
-        "pending_code_approval": "engineering_code",
+        "pending_spec_approval": "spec",
+        "pending_code_approval": "engineering",
     }
     return inverse.get(status)
 
@@ -1454,37 +1496,6 @@ def build_state_from_task(db_task: Task) -> AgentState:
         "engineering_qa": db_task.engineering_qa,
         "last_rejected_step": db_task.last_rejected_step,
     }
-
-
-async def _reset_graph_to_step(task_id: str, step: str, checkpointer: AsyncSqliteSaver):
-    """
-    Manually resets the graph's checkpoint history to a specific step.
-    This is crucial for resubmission, as it forces the graph to "forget"
-    it has already completed the step and subsequent steps.
-    """
-    config = {"configurable": {"thread_id": task_id}}
-    # The .get() method on the checkpointer, when called with just the thread_id,
-    # returns the full history of checkpoints for that thread.
-    checkpoint_tuples = await checkpointer.aget(config)
-    if not checkpoint_tuples:
-        return
-
-    # Find the index of the last time the target step was completed
-    last_occurrence_idx = -1
-    for i, checkpoint_tuple in enumerate(checkpoint_tuples):
-        # The checkpoint is a JSON string, so we need to load it first.
-        try:
-            checkpoint_dict = json.loads(checkpoint_tuple.checkpoint)
-            if checkpoint_dict.get("name") == step:
-                last_occurrence_idx = i
-        except (json.JSONDecodeError, AttributeError):
-            continue # Ignore malformed checkpoints
-
-    if last_occurrence_idx != -1:
-        # If the step was found, truncate the history to that point
-        new_checkpoint_tuples = checkpoint_tuples[:last_occurrence_idx]
-        await checkpointer.aput(config, new_checkpoint_tuples)
-        logger.info(f"Rewound graph history for task {task_id} to before step '{step}'.")
 
 # --- API Endpoints (Refactored) ---
 @app.post("/start_task", response_model=TaskStatus)
@@ -1582,32 +1593,11 @@ def list_tasks(db: Session = Depends(get_db)):
     return [TaskStatus.from_orm(task) for task in tasks]
 
 
-@app.post("/update_artifact", response_model=TaskStatus)
-async def update_artifact(request: ArtifactUpdateRequest, db: Session = Depends(get_db)):
-    db_task = db.query(Task).filter(Task.task_id == request.task_id).first()
-    if not db_task:
-        raise HTTPException(status_code=404, detail="Task not found.")
-    if db_task.status not in PENDING_STATUSES:
-        raise HTTPException(
-            status_code=400,
-            detail="Artifacts can only be edited while the task is pending approval.",
-        )
-
-    if not hasattr(db_task, request.artifact_name):
-        raise HTTPException(status_code=400, detail=f"Invalid artifact name: {request.artifact_name}")
-
-    # 1. Update the main database
-    setattr(db_task, request.artifact_name, request.content)
-    db.commit()
-    db.refresh(db_task)
-    logger.info(f"Updated artifact '{request.artifact_name}' for task {request.task_id} in DB.")
-
-    # 2. Update the graph's checkpointed state
-    config = {"configurable": {"thread_id": request.task_id}}
-    await get_app_graph().aupdate_state(config, {request.artifact_name: request.content})
-    logger.info(f"Updated artifact '{request.artifact_name}' for task {request.task_id} in LangGraph state.")
-
+@app.post("/update_artifacts", response_model=TaskStatus)
+def update_artifacts(request: ArtifactUpdate, db: Session = Depends(get_db)):
+    db_task = apply_artifact_overrides(request.task_id, request, db)
     return TaskStatus.from_orm(db_task)
+
 
 @app.get("/tasks/export")
 def export_tasks(db: Session = Depends(get_db)):
@@ -1687,35 +1677,20 @@ async def respond_to_approval(request: RespondToApprovalRequest, db: Session = D
         logger.info(f"Task {request.task_id} rejected at step {db_task.last_rejected_step}.")
         return TaskStatus.from_orm(db_task)
 
+    resolved_status = get_next_status(current_status=request.overrides.get('status') if request.overrides else None)
     logger.info(f"Task {request.task_id} approved by human. Resuming graph.")
 
-    # Immediately update the status to 'processing' to give the user feedback
-    db_task.status = "processing"
-    db_task.pending_approval_content = "Approved. The next agent is now working on the task..."
-    db.commit()
-    db.refresh(db_task)
-
-    # 1. Apply any overrides from the user before resuming the graph
+    # 1. Define the config to resume the correct graph instance
     config = {"configurable": {"thread_id": request.task_id}}
-    if request.overrides:
-        logger.info(f"Applying overrides for task {request.task_id}: {list(request.overrides.keys())}")
-        # Persist overrides to the main DB as well
-        for field, value in request.overrides.items():
-            if hasattr(db_task, field):
-                setattr(db_task, field, value)
-        await get_app_graph().aupdate_state(config, request.overrides)
-
-    # 2. Define the config to resume the correct graph instance
     graph = get_app_graph()
-    
-    # 3. Invoke the graph again. The checkpointer loads the state automatically.
+
+    # 2. Invoke the graph again. The checkpointer loads the state automatically.
     final_state = await graph.ainvoke(None, config)
     logger.info(f"Graph for task {request.task_id} advanced to state '{final_state.get('status')}'.")
 
-    # 4. Update our application DB with the new status/content
+    # 3. Update our application DB with the new status/content
     db_task.status = final_state.get('status', db_task.status)
     db_task.pending_approval_content = final_state.get('pending_approval_content')
-    
     artifact_fields = [
         'research_summary',
         'prd_summary',
@@ -1729,9 +1704,9 @@ async def respond_to_approval(request: RespondToApprovalRequest, db: Session = D
         'engineering_qa',
     ]
     for field in artifact_fields:
-        if final_state and final_state.get(field):
-            setattr(db_task, field, final_state.get(field))
-
+        current_value = getattr(db_task, field)
+        new_value = final_state.get(field) if final_state else None
+        setattr(db_task, field, current_value or new_value)
     db.commit()
     logger.info(f"Task {request.task_id} updated in DB to final status '{db_task.status}'.")
     
@@ -1740,7 +1715,7 @@ async def respond_to_approval(request: RespondToApprovalRequest, db: Session = D
 
 @app.post("/resubmit_step", response_model=TaskStatus)
 async def resubmit_step(request: ResubmitRequest, db: Session = Depends(get_db)):
-    allowed_steps = set(STEP_STATUS_MAP.keys())
+    allowed_steps = set(STEP_STATUS_MAP.keys()) | {"spec"}
     if request.step not in allowed_steps:
         raise HTTPException(status_code=400, detail="Invalid step for resubmission.")
 
@@ -1752,47 +1727,41 @@ async def resubmit_step(request: ResubmitRequest, db: Session = Depends(get_db))
     if db_task.last_rejected_step != request.step:
         raise HTTPException(status_code=400, detail="Resubmit step does not match last rejection.")
 
-    logger.info("Resubmitting task %s for step %s", request.task_id, request.step)
-    graph = get_app_graph()
-    config = {"configurable": {"thread_id": request.task_id}}
-
-    # 1. Clear downstream artifacts in the database to ensure a clean run
     clear_artifacts_for_step(db_task, request.step)
-    db.commit()
-    db.refresh(db_task)
+    state = build_state_from_task(db_task)
+    state["status"] = STEP_STATUS_MAP[request.step]
+    state["pending_approval_content"] = None
 
-    # This is the most important step: we must rewind the graph's history
-    # to force it to re-run the rejected step.
-    await _reset_graph_to_step(request.task_id, request.step, memory_saver)
+    step_fn_map = {
+        "research": research_node,
+        "product_prd": product_prd_node,
+        "product_stories": product_stories_node,
+        "ux_design": ux_design_node,
+        "spec": engineering_spec_node,
+        "developer": developer_node,
+    }
+    step_fn = step_fn_map.get(request.step)
+    if not step_fn:
+        raise HTTPException(status_code=400, detail="Unsupported step.")
 
-    # 2. Get the current graph state and update it for resubmission
-    current_state = await graph.aget_state(config)
-    state_to_update = build_state_from_task(db_task)
-    state_to_update["status"] = "resubmitting" # A transient status
-    await graph.aupdate_state(config, state_to_update)
-
-    # 3. Invoke the graph starting from the resubmitted step. The `from_node`
-    # parameter forces the graph to rewind and start execution from this specific node,
-    # ignoring its previous position. It will then run until the next interruption.
-    final_state = await graph.ainvoke(None, config, from_node=request.step)
-    logger.info(f"Graph for task {request.task_id} advanced to state '{final_state.get('status')}' after resubmission.")
-
-    # 4. Update the database with the new state from the graph
-    db_task.status = final_state.get('status', db_task.status)
-    db_task.pending_approval_content = final_state.get('pending_approval_content')
-    artifact_fields = list(AgentState.__annotations__.keys())
-    for field in artifact_fields:
-        if field in ['task_id', 'product_idea']:
-            continue
-        if final_state and final_state.get(field):
-            setattr(db_task, field, final_state.get(field))
-
+    updated_state = step_fn(state)
+    db_task.status = updated_state.get("status", db_task.status)
+    db_task.pending_approval_content = updated_state.get("pending_approval_content")
+    db_task.research_summary = updated_state.get("research_summary")
+    db_task.prd_summary = updated_state.get("prd_summary")
+    db_task.user_stories = updated_state.get("user_stories")
+    db_task.user_flow_diagram = updated_state.get("user_flow_diagram")
+    db_task.wireframe_html = updated_state.get("wireframe_html")
+    db_task.engineering_spec = updated_state.get("engineering_spec")
+    db_task.engineering_spec_qa = updated_state.get("engineering_spec_qa")
+    db_task.engineering_file_name = updated_state.get("engineering_file_name")
+    db_task.engineering_code = updated_state.get("engineering_code")
+    db_task.engineering_qa = updated_state.get("engineering_qa")
     db_task.last_rejected_step = None
     db_task.last_rejected_at = None
     db.commit()
     db.refresh(db_task)
-    
-    logger.info("Task %s resubmitted and updated in DB to status '%s'", request.task_id, db_task.status)
+    logger.info("Task %s resubmitted for step %s", request.task_id, request.step)
     return TaskStatus.from_orm(db_task)
 
 # --- Static File and Status Endpoints ---

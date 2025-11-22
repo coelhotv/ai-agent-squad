@@ -536,7 +536,7 @@
                 <details id="engineering-qa-results">
                     <summary>Engineering QA</summary>
                     <div class="artifact-row">
-                        <pre id="engineering-qa">No QA yet.</pre>
+                        <pre id="engineering-qa-content">No QA yet.</pre>
                         <button class="edit-btn" type="button" data-artifact="engineering_qa">Edit</button>
                     </div>
                 </details>
@@ -587,7 +587,7 @@
         const engineeringSpecQa = document.getElementById('engineering-spec-qa');
         const engineeringCode = document.getElementById('engineering-code');
         const engineeringQa = document.getElementById('engineering-qa');
-        const qaReview = document.getElementById('qa-review');
+        const engineeringQaContent = document.getElementById('engineering-qa-content');
         const overlay = document.getElementById('artifact-overlay');
         const overlayTitle = document.getElementById('overlay-title');
         const overlayText = document.getElementById('overlay-text');
@@ -601,6 +601,7 @@
         let hasPendingTask = false;
         let lastRejectedStep = null;
         let editingArtifact = null;
+        let artifactOverrides = {};
         const artifactDisplays = {
             research_summary: document.getElementById('research-content'),
             prd_summary: document.getElementById('prd-content'),
@@ -610,7 +611,7 @@
             engineering_spec: engineeringSpec,
             engineering_spec_qa: engineeringSpecQa,
             engineering_code: engineeringCode,
-            engineering_qa: engineeringQa,
+            engineering_qa: engineeringQaContent,
         };
         let storedFlowDiagram = null;
         let storedWireframeHtml = null;
@@ -624,6 +625,7 @@
             { key: 'pending_spec_approval', label: 'Eng. Spec', description: 'API spec & QA' },
             { key: 'pending_code_approval', label: 'Eng. Code', description: 'Code prototype & QA' },
             { key: 'ready_for_gtm', label: 'GTM Handoff', description: 'Ready for launch docs' },
+            { key: 'processing', label: 'Processing', description: 'Agent at work' },
             { key: 'completed', label: 'Shipped', description: 'Final deliverables' },
             { key: 'rejected', label: 'Rejected', description: 'Manual review' },
         ];
@@ -637,6 +639,7 @@
             'pending_spec_approval',
             'pending_code_approval',
             'ready_for_gtm',
+            'processing',
             'completed',
             'rejected',
         ];
@@ -649,6 +652,7 @@
             pending_ux_approval: 'UX Designer',
             pending_spec_approval: 'Architect Agent',
             pending_code_approval: 'Engineering Agent',
+            processing: 'Agent at work...',
             ready_for_gtm: 'GTM Agent',
             completed: 'GTM Agent',
             rejected: 'Coordinator (Manual review)',
@@ -778,6 +782,7 @@
             hasPendingTask = false;
             lastRejectedStep = null;
             resubmitContainer.innerHTML = '';
+            artifactOverrides = {};
             resubmitContainer.classList.add('hidden');
             setFormEnabled(true);
         }
@@ -807,7 +812,7 @@
             renderArtifact(engineeringSpec, null);
             renderArtifact(engineeringSpecQa, null);
             renderEngineeringPrototype(null, null);
-            renderArtifact(engineeringQa, null);
+            renderArtifact(engineeringQaContent, null);
         }
 
         function updateArtifactsFromTask(task) {
@@ -819,7 +824,7 @@
             renderArtifact(engineeringSpec, task?.engineering_spec);
             renderArtifact(engineeringSpecQa, task?.engineering_spec_qa);
             renderEngineeringPrototype(task?.engineering_file_name, task?.engineering_code);
-            renderArtifact(engineeringQa, task?.engineering_qa);
+            renderArtifact(engineeringQaContent, task?.engineering_qa);
         }
 
         ideaForm.addEventListener('submit', async (e) => {
@@ -894,15 +899,15 @@
         function renderFlowDiagram(diagramText) {
             storedFlowDiagram = diagramText?.trim() || null;
             viewFlowBtn.disabled = !storedFlowDiagram;
-            artifactDisplays.user_flow_diagram.textContent =
-                storedFlowDiagram ? 'Diagram ready for review' : 'No diagram yet.';
+            const flowStatusEl = document.getElementById('flow-status');
+            if (flowStatusEl) flowStatusEl.textContent = storedFlowDiagram ? 'Diagram ready for review' : 'No diagram yet.';
         }
 
         function renderWireframe(htmlText) {
             storedWireframeHtml = htmlText?.trim() || null;
             viewWireframeBtn.disabled = !storedWireframeHtml;
-            artifactDisplays.wireframe_html.textContent =
-                storedWireframeHtml ? 'Wireframe ready for review' : 'No wireframe yet.';
+            const wireframeStatusEl = document.getElementById('wireframe-status');
+            if (wireframeStatusEl) wireframeStatusEl.textContent = storedWireframeHtml ? 'Wireframe ready for review' : 'No wireframe yet.';
         }
 
         function renderEngineeringPrototype(fileName, codeText) {
@@ -922,8 +927,8 @@
                 });
                 if (!response.ok) throw new Error('Resubmit failed');
                 const updated = await response.json();
+                showMessage(`Task ${taskId} resubmitted for ${step}. Now pending your approval.`);
                 markPendingTask(updated);
-                showMessage(`Task ${taskId} resubmitted for ${step}.`);
             } catch (err) {
                 console.error(err);
                 showMessage(err.message || 'Resubmit failed', true);
@@ -953,27 +958,25 @@
                 closeOverlay();
                 return;
             }
+            const newValue = overlayText.value;
             const payload = {
                 task_id: currentTaskId,
-                [editingArtifact]: overlayText.value,
+                artifact_name: editingArtifact,
+                content: newValue,
             };
+
             try {
-                const response = await fetch(`${API_BASE_URL}/update_artifacts`, {
+                const response = await fetch(`${API_BASE_URL}/update_artifact`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload),
                 });
                 if (!response.ok) throw new Error('Unable to save artifact.');
                 const data = await response.json();
-                if (editingArtifact === 'user_flow_diagram') {
-                    renderFlowDiagram(data.user_flow_diagram);
-                } else if (editingArtifact === 'wireframe_html') {
-                    renderWireframe(data.wireframe_html);
-                } else {
-                    artifactDisplays[editingArtifact].textContent =
-                        data[editingArtifact]?.trim() || 'No content yet.';
-                }
-                showMessage('Artifact updated. Approve when ready.');
+                
+                // Update UI from server response
+                updateArtifactsFromTask(data);
+                showMessage('Artifact saved successfully.');
             } catch (error) {
                 showMessage(error.message, true);
             } finally {
@@ -1075,7 +1078,7 @@ ${storedWireframeHtml}
                 const response = await fetch(`${API_BASE_URL}/respond_to_approval`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ task_id: currentTaskId, approved }),
+                    body: JSON.stringify({ task_id: currentTaskId, approved, overrides: artifactOverrides }),
                 });
                 if (!response.ok) throw new Error('Unable to respond to approval.');
                 const data = await response.json();
@@ -1085,6 +1088,7 @@ ${storedWireframeHtml}
                 if (approved && !optimistic) {
                     disableArtifactButtonsForStatus(prevStatus);
                 }
+                artifactOverrides = {}; // Clear overrides after submission
                 updateArtifactsFromTask(data);
                 if ([
                     "pending_research_approval",
@@ -1096,6 +1100,9 @@ ${storedWireframeHtml}
                     "pending_approval"
                 ].includes(data.status)) {
                     showMessage(`Task ${data.task_id} advanced to ${data.status}. Waiting for the next approval.`);
+                    markPendingTask(data);
+                } else if (data.status === 'processing') {
+                    showMessage(`Task ${data.task_id} advanced to ${data.status}. Waiting for the next approval.`);
                     currentTaskId = data.task_id;
                     startPolling();
                 } else if (data.status === 'ready_for_gtm') {
@@ -1104,6 +1111,7 @@ ${storedWireframeHtml}
                 } else if (data.status === 'rejected') {
                     showMessage(`Task ${data.task_id} was rejected. Manual review required.`, true);
                     currentTaskId = null;
+                    approvalSection.classList.add('hidden');
                 } else {
                     showMessage(`Task ${data.task_id} status: ${data.status}.`);
                     currentTaskId = null;
