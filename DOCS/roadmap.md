@@ -1,69 +1,42 @@
 # Roadmap
 
-Each phase represents a major milestone in the Multi-Agent Product Squad. Status notes keep the team aligned.
+Each phase documents a major milestone for the Multi-Agent Product Squad. Use this doc to track progress, celebrate completions, and signal what remains.
 
 ## Completed Phases
 
-### Phase 1 – The Stack (✅)
+### Phase 1 – Stack Foundation (✅)
+- Hybrid architecture: Dockerized FastAPI/LangGraph runs inside `app_service` while Ollama (hosted) handles LLM inference.
+- Persistent storage split between `tasks.db` (high-level artifacts/status) and `checkpoints.sqlite` (LangGraph’s `AsyncSqliteSaver` state).
+- Initial endpoints (`/start_task`, `/tasks`, `/respond_to_approval`, `/get_pending_approval`) and a barebones UI existed to validate the serialized workflow.
 
-- Hybrid architecture: Dockerized FastAPI + LangGraph, native Ollama host.
-- `docker-compose.yml`, `Dockerfile`, and `requirements.txt` created.
-- Ollama model switched to `deepseek-r1:8b-0528-qwen3-q4_K_M`, and we now pair it with `qwen2.5-coder:7b-instruct-q6_K` for coding-intensive specialists.
-- SQLite persistence established (`tasks.db`, `checkpoints.sqlite`).
-- Hello-world flow validated (logging, connectivity, vscode/.venv setup).
+### Phase 2 – HITL Control & Coach UI (✅)
+- The intake page (`index.html`) now renders workflow pills, status badges, approval prompts, response messages, and artifact cards with edit overlays.
+- `/tasks_dashboard` (`tasks.html`) and `/tasks/export` provide auditing/export capabilities while polling keeps the UI fresh.
+- Approval logic was refactored so each node sets `pending_*` statuses, stores `pending_approval_content`, and waits for `/respond_to_approval`.
 
-### Phase 2 – Core Loop & HITL UI (✅)
+### Phase 3 – Research + Product (✅)
+- Research agent calls Perplexity `sonar-pro` and falls back to DuckDuckGo when necessary; the Research node writes structured findings into both the graph and DB.
+- Product agent now writes a concise PRD and user stories, each pausing for a separate approval window. Artifact edits persist back into LangGraph state.
 
-- FastAPI endpoints: `/start_task`, `/get_pending_approval`, `/respond_to_approval`, `/tasks`.
-- LangGraph workflow reworked around `AsyncSqliteSaver` for reliable pause/resume.
-- UI for intake (`index.html`) and dashboard (`tasks.html`) built.
-- `tasks.db`/`checkpoints.sqlite` separation enforced to keep high-level UI state apart from graph internals.
-- `/tasks_dashboard` added for easy auditing.
+### Phase 4 – UX + Collaborative Approvals (✅)
+- UX agent builds Mermaid flows and Tailwind wireframes; the UI preview buttons open those artifacts in new tabs, and exports include `user_flow_diagram`/`wireframe_html`.
+- Humans can edit any pending artifact (research, PRD, stories, flow, wireframe) via `/update_artifact`; overrides sync to the checkpoint so downstream agents honor the edits.
+- A resubmit flow (`/resubmit_step`) reruns the rejected node after clearing downstream artifacts, giving humans a quick path to regenerate specific deliverables.
 
-### Phase 3 – Research Agent (✅)
-
-- Research node calls Perplexity (`sonar-pro`) with structured JSON; fallback to DuckDuckGo.
-- Research summary stored in both DB and LangGraph state.
-- UI surfaces pending research and requires HITL approval before continuing.
-
-### Phase 4 – Design Sprint (✅)
-
-- Product agent drafts PRDs and user stories with two HITL approvals.
-- UX/Designer agent generates Mermaid flows + Tailwind wireframes via structured `/api/generate` calls, keeps them in sync, and surfaces them with preview buttons that open new tabs.
-- Artifacts are persisted (`user_flow_diagram`, `wireframe_html`) and exposed via `/tasks_dashboard` and CSV export.
-- Main intake UI now highlights workflow stages, status messages, and artifact controls so operators can stay on one screen.
-
-### Phase 4.5 – Collaborative Approvals (✅)
-
-Now we can let humans edit every artifact before approving it so they can improve the research/PRD/stories/UX work instead of only gating it.
-- Add edit controls next to each artifact that are active only while the corresponding `pending_*` status is waiting.
-- Persist edits to `tasks.db` and pass the new text back into the graph state (or reload it from the DB) so downstream agents consume the human updates.
-- Allow the preview buttons to render the edited flow/wireframe content, and lock the fields once the task advances past approval/rejection.
-- Included a re-submit flow for artifacts that are rejected. Now HITL could redo the last agent flow to create a new version of its artifact.
-
-### Phase 5 – Build Sprint (✅)
-
-- Engineering now runs as a two-step process for higher quality.
-- **Step 1 (Spec):** An Architect agent generates an API spec, which is immediately reviewed by a QA agent. This bundle is presented for HITL approval at `pending_spec_approval`.
-- **Step 2 (Code):** After spec approval, a Developer agent generates the code, which is presented for final approval at `pending_code_approval`.
-- New artifacts (`engineering_spec`, `engineering_spec_qa`, `engineering_code`) are rendered in the UI and exported.
+### Phase 5 – Engineering Bundle + QA (✅)
+- Architect reasoning + contract generation now emit structured `schemas`/`endpoints`, followed by a spec QA review stored in `engineering_spec_qa`.
+- Developer agent implements the spec as code, then runs an engineering QA review (`engineering_qa`) before pausing at `pending_code_approval`.
+- The UI shows spec/code/QA artifacts, and CSV exports include all engineering outputs.
 
 ## In Progress
 
-- None
+- None. The stack currently pauses at `pending_code_approval` before a future GTM node marks tasks `ready_for_gtm`.
 
 ## Future Phases
 
-### Phase 6 – Ship (🟢)
+### Phase 6 – GTM & Ship (🟢)
+- Add a GTM agent that synthesizes the artifacts into a polished README/package deliverable plus launch notes.
+- Extend the graph to mark `ready_for_gtm` (or `completed`) once GTM work is approved, and reflect that final status in both the UI and `/tasks` exports.
+- Document any new monitoring, onboarding, or release steps inside `DOCS/operations.md`.
 
-Objective: Add GTM agent and finalize the deliverable package.
-
-Planned work:
-- GTM agent writes a polished `README.md`.
-- Task output (research, PRD, stories, flows, prototype, README) is collected under `dist/` or similar folder.
-- Workflows include a final approval for the GTM article.
-
-Success Criteria:
-- Full artifact bundle is easy to download or examine.
-- Dashboard highlights shipped tasks separately.
-- Hand-off documentation updated (`DOCS/operations.md`) with current ops steps.
+As phases evolve, adjust this roadmap along with `DOCS/overview.md`, `DOCS/architecture.md`, and `README.md` so contributors always have a consistent narrative.

@@ -1,76 +1,41 @@
 # Workflow & Approval Loop
 
-## End-to-End Flow
+This document tracks every turn of the graph from `POST /start_task` through approvals, artifact edits, and eventual completion.
 
-<img src="images/main-ui.png" alt="Hero intake UI" width="640">
+## 1. Submit an Idea
 
-The squad follows a serialized, checkpointed sequence. Each node in the LangGraph graph runs once, outputs a structured result, and then pauses for a human approval before continuing. FastAPI endpoints and the UI keep you in sync with the workflow, and the refreshed home page shows a floating intake card, a live status pill, and workflow stage cards so you always know which agent is active.
+1. The user loads `index.html` (served at `/`) and submits a product idea via `POST /start_task`.
+2. FastAPI creates a `Task` record (`status="starting"`) in `tasks.db`, defines the initial `AgentState`, and invokes the LangGraph graph with `thread_id=task_id`.
+3. The graph runs the `research` node, writes its artifact fields, updates `status="pending_research_approval"`, and interrupts before moving on. The backend then syncs `tasks.db` with the LangGraph state, returning the task to the UI with the research summary and approval prompt.
+4. If another task is still waiting for approval, `index.html`’s `checkPendingApprovalOnLoad`/polling prevents new submissions until the pending work resolves.
 
-### 1. Submit an Idea
+## 2. Node-by-Node Progression
 
-Navigate to `http://localhost:8000` (served by `index.html`), enter a product idea, and click **"Start Task"**. The hero card displays a response/status message directly beneath the form, so confirmation/error text is immediate. The browser calls `POST /start_task`, which:
+- **Research** (`pending_research_approval`): Calls Perplexity `sonar-pro` (or DuckDuckGo) to produce summaries, opportunities, risks, and references. UI shows the research accordion and an Edit button while waiting for approval.
+- **Product PRD** (`pending_prd_approval`): The next run drafts a one-page PRD, updates the task, and pauses for human review.
+- **User Stories** (`pending_story_approval`): The product node returns again with stories & acceptance criteria; the UI surfaces them with an edit option before moving to UX.
+- **UX Design** (`pending_ux_approval`): The UX agent emits a Mermaid user flow and a Tailwind/HTML wireframe. Buttons labeled “View Flow Diagram” and “View Wireframe” enable full-screen previews. While pending, the UI enables their Edit overlay inputs as well.
+- **Engineering Spec** (`pending_spec_approval`): The architect prompts Ollama reasoning/coding models to produce schemas & endpoints, runs a QA review (`run_spec_qa_review`), and pauses so humans can read the spec + QA output.
+- **Engineering Code** (`pending_code_approval`): The developer model implements the contract in a single-file FastAPI prototype, runs `run_engineering_qa_review`, and stops for final approval before marking the task as ready for GTM.
 
-1. Generates a UUID `task_id`.
-2. Saves a new row to `tasks.db` with `status="starting"`.
-3. Triggers the LangGraph workflow with `thread_id=task_id` via `AsyncSqliteSaver`.
+Each approval returns to `/respond_to_approval`, which logs the transition and, if approved, resumes the graph. The UI optimistically advances the workflow stage while the backend completes the next node. If you reject, the task status becomes `rejected`, records `last_rejected_step`, timestamps `last_rejected_at`, and exposes the resubmit banner in the UI.
 
-The initial task record appears immediately on `tasks_dashboard` (`tasks.html`), which polls `GET /tasks` every five seconds. The intake page also checks `GET /get_pending_approval` as soon as it loads, so any prior task left waiting is reloaded into the UI and new idea submission is blocked until the human resolves the pending approval.
+## 3. Human Editing & Overrides
 
-### 2. Research Node
+- While a task status is in `PENDING_STATUSES` (see `app.py`), every artifact card shows an Edit button. The overlay sends `POST /update_artifact`, which writes to both `tasks.db` and the LangGraph checkpoint so the next agent consumes the updated content.
+- Approvals can include overrides (the UI persists `artifactOverrides`) that are sent with `/respond_to_approval` so the backend updates both the DB and the graph state before continuing.
+- If a task is rejected, the UI renders a resubmit banner with `resubmitStep(task_id, last_rejected_step)`; `/resubmit_step` clears downstream fields via `clear_artifacts_for_step` and runs the node function directly so only that stage regenerates.
 
-The Research node executes first. It tries to call Perplexity’s `sonar-pro` model using `PERPLEXITY_API_KEY` to get structured JSON (summary, opportunities, risks, references). If that fails, it falls back to DuckDuckGo via `ddgs`.
+## 4. Pending Queue & Dashboard
 
-Once research text is produced:
+- `/get_pending_approval` returns the oldest pending task for `index.html` to display; the same endpoint powers polling in `tasks.html` and the intake page’s queue refresher.
+- `/tasks` feeds the `/tasks_dashboard` table, and `/tasks/export` streams `tasks_export.csv` with every artifact column plus `pending_approval_content`, `last_rejected_*`, and other metadata for auditing.
+- The dashboard polls every five seconds, so the latest statuses (processing, pending, ready_for_gtm, completed, rejected) remain visible even when multiple tasks flow through the queue.
 
-- The LangGraph state is updated (`status="pending_research_approval"`).
-- Research text is saved to the task row.
-- A human receives the info in the UI.
+## 5. Persistence & Recovery
 
-The state pauses and waits for manual approval.
+- `checkpoints.sqlite` (AsyncSqliteSaver) records every restartable state so, after a crash, `start_task`/`respond_to_approval` can reload the same thread and resume from the last interrupt.
+- `tasks.db` mirrors the human-visible data so both the UI and `/tasks_export` can render artifacts even if the graph is mid-run.
+- The intake UI blocks new submissions until `currentTaskId` settles to `null`, ensuring humans finish one approval before starting another idea.
 
-### 3. Product Agent (PRD & User Stories)
-
-After Research is approved via the UI, `POST /respond_to_approval` resumes the graph:
-
-1. Product agent drafts a concise PRD (executive summary, market opportunity, customer needs, scope, success metrics).
-2. It pauses again with `status="pending_prd_approval"` to show the PRD in the UI.
-3. After PRD approval, the `respond_to_approval` endpoint runs the Product node again, which now produces user stories + acceptance criteria.
-4. The state updates to `pending_story_approval`.
-
-Each pause is captured in `checkpoints.sqlite`, so crashes/resets do not lose context.
-
-### 4. UX / Design Stage (Phase 4)
-
-Once the stories are approved, the UX agent runs automatically:
-
-1. `ux_design_node` generates a Mermaid user flow (`user_flow_diagram`) with structured JSON returned from Ollama’s `/api/generate`.
-2. The same node immediately feeds that flow, along with the approved stories, into the Tailwind wireframe generator so both artifacts stay synchronized.
-3. Status changes to `pending_ux_approval`, and the UI now offers “View Flow” / “View Wireframe” buttons that open each artifact in a new tab for full-screen previews; each artifact panel also includes an Edit button active while the task is pending, so humans can revise research, PRDs, stories, or UX artifacts before approving.
-4. On approval, the workflow advances toward engineering.
-
-All UX outputs are stored in `tasks.db`, listed on `/tasks_dashboard`, and included in `/tasks/export`.
-
-### 5. Engineering Sprint (Phase 5)
-
-After UX approval, the Engineering sprint runs as two distinct HITL steps:
-
-1.  **Specification & Review:** The `engineering_spec_node` runs, where an Architect agent generates an API specification and a QA agent immediately reviews it for logical gaps. The status changes to `pending_spec_approval`, and the UI surfaces both the spec and the QA review for HITL approval.
-2.  **Implementation:** Once the spec is approved, the `developer_node` runs. A coding agent implements the approved spec into a single-file FastAPI app.
-3.  **Final Code Review:** The status changes to `pending_code_approval`, and the UI surfaces the final generated code for HITL approval.
-
-This two-step process ensures a higher-quality spec is fed to the developer agent, reducing bugs and improving the final output.
-
-### 6. Watching the Dashboard
-
-`tasks.html` renders the full table of tasks with elastic columns and proper status badges. The manual refresh button hits `GET /tasks`, while auto polling keeps data fresh. Export everything at once with `GET /tasks/export` (via the **Export CSV** button). Artifact collapsibles on the main intake page mirror the latest research, PRD, story, flow, and wireframe content so approvers can stay in one place.
-
-### 7. Next Specialist Phases
-
-With Phase 5 live, the graph now pauses at `status="ready_for_gtm"` after the engineering bundle is approved. The GTM node in Phase 6 will follow the same pattern:
-
-- Produce structured output.
-- Save it to the task record.
-- Pause for human approval via `respond_to_approval`.
-- Continue once the human gives the green light.
-
-The `tasks.db` row and `checkpoints.sqlite` resume state so, at any time, you can reopen the dashboard and see where each task stands.
+Use `DOCS/architecture.md` for the backend interplay, `DOCS/operations.md` for monitoring/output, and `DOCS/setup.md` when configuring Ollama/Perplexity.

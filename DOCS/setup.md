@@ -36,13 +36,19 @@ These packages support LangGraph checkpoints, DuckDuckGo fallbacks, and Perplexi
 
 ## Environment Variables
 
-- `PERPLEXITY_API_KEY` (optional): When set, the Research agent calls Perplexity’s `sonar-pro` model for structured JSON summaries. Without it, DuckDuckGo is used.
-- `OLLAMA_REASONING_MODEL` (optional): Defaults to `deepseek-r1:8b-0528-qwen3-q4_K_M`.
-- `OLLAMA_CODING_MODEL` (optional): Defaults to `qwen2.5-coder:7b-instruct-q6_K`.
-- `OLLAMA_MODEL` (optional): Legacy fallback for whichever model you want to return if the role-specific values are unset.
-- `OLLAMA_BASE_URL` (optional): Defaults to `http://host.docker.internal:11434`. Change only if your host exposes Ollama differently.
+- `PERPLEXITY_API_KEY` (optional): When set, the Research agent calls Perplexity’s `sonar-pro` model, logs the masked key, and expects structured JSON with summary/opportunity/risk/reference fields. Without the key or when the call fails, the agent automatically runs DuckDuckGo (`ddgs`) as a fallback.
+- `OLLAMA_REASONING_MODEL` (optional): Defaults to `deepseek-r1:8b-0528-qwen3-q4_K_M`; used for PRD, user stories, architect reasoning, and QA reviews.
+- `OLLAMA_CODING_MODEL` (optional): Defaults to `qwen2.5-coder:7b-instruct-q6_K`; used for UX diagrams/wireframes, spec contracts, and prototype code generation.
+- `OLLAMA_MODEL` (optional): Single fallback if the model-specific values are unset.
+- `OLLAMA_BASE_URL` (optional): Defaults to `http://host.docker.internal:11434`. Change only if Ollama exposes a different host/port.
+- `DATABASE_URL`: Controls where `tasks.db` lives. The app logs the URL on startup and creates the file if it is missing.
+- `CHECKPOINTS_PATH`: Controls where `checkpoints.sqlite` is stored; if the parent directory is missing, the app will attempt to create it and log the result.
 
 Copy `.env.example` to `.env` and update values there. Docker Compose automatically loads `.env`, so you can tweak configs without rebuilding. For ad-hoc overrides, you can still export them in your shell.
+
+## Persistence Notes
+
+The backend logs whether the Perplexity key, Ollama base URL, and checkpoint path are reachable. It also checks that the parent of `CHECKPOINTS_PATH` is writable and tries to create it if it is missing. The Docker volume `app_data` (mounted at `/data`) backs `tasks.db` and `checkpoints.sqlite`, so make sure the host user can write into that directory; otherwise, the app warns that SQLite persistence may fail.
 
 ## Optional: Resetting State
 

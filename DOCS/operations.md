@@ -1,35 +1,34 @@
 # Operations & Monitoring
 
-## Monitoring the System
+## Monitoring the Stack
 
-- Watch Docker logs with `docker-compose logs -f app_service` to view LangGraph progress statements (`logger.info` calls in `research_node`, `product_prd_node`, etc.).
-- Use `docker stats app_service` if you suspect resource contention.
-- Health-check the UI endpoints at `http://localhost:8000` and `http://localhost:8000/tasks_dashboard`.
-- On startup the intake page queries `/get_pending_approval` and locks the submission form if a previous workflow is still waiting, so you must finish that work before starting a new idea.
-- Checkpoint resilience: even if the backend restarts, `checkpoints.sqlite` keeps pending graph state so approvals can resume where they left off.
+- Tail the Docker service: `docker-compose logs -f app_service` shows the environment summary, per-node progress, QA verdicts, and Ollama/Perplexity connectivity checks (`log_environment_status`).
+- Watch resource usage with `docker stats app_service` if agents stall.
+- After startup, the intake UI calls `/get_pending_approval` so the system locks new submissions until the oldest pending approval clears. If a task is already paused, approve/reject it before sending a new idea.
 
-## Dashboard & CSV Export
+## Workflow Interaction
 
-- `/tasks_dashboard` (`tasks.html`) renders every row from `tasks.db`. It automatically polls `/tasks` every five seconds and shows statuses with color coding.
-- The **Export CSV** button hits `GET /tasks/export` to stream `tasks_export.csv`, which includes columns for Task ID, Product Idea, Status, Research Summary, PRD Summary, User Stories, and Pending Approval Content. Use it for external audits or backups.
-- For manual data inspection, open `tasks.db` using `sqlite3 tasks.db "SELECT * FROM Task;"`.
+- Approvals are the single source of truth. `/respond_to_approval` flips the `pending_*` status to `processing`, resumes the graph, and writes new artifacts back to `tasks.db`. Approve (`approved: true`) to continue, or reject (`approved: false`) to surface the resubmit banner.
+- Humans can edit research/PRD/stories/flow/wireframe/spec/code/QA artifacts while the task is pending by clicking the Edit button; the overlay posts `/update_artifact`, updating both the DB and LangGraph checkpoint state.
+- If you reject a review, use the resubmit banner in the UI or call `POST /resubmit_step` to rerun a single node. The backend clears downstream artifacts before rerunning the node function so no stale data leaks forward.
+- `GET /get_pending_approval` is polled every 4 seconds while the UI waits for work. `/tasks` drives `tasks.html`, and `/tasks/export` streams `tasks_export.csv` (includes all artifact columns plus `pending_approval_content`, `last_rejected_step`, `last_rejected_at`).
 
-## Logs & Debugging
+## Persistence Hygiene
 
-- FastAPI logs appear in Docker output, showing request lifecycle and approval events.
-- SQLAlchemy logging is throttled to `WARNING` level (`logging.getLogger('sqlalchemy.engine').setLevel(logging.WARNING)`) to minimize noise from frequent dashboard polling.
-- At startup the app logs a configuration summary (database URL, checkpoint path, Ollama host/model, Perplexity key presence, `/data` writability, and Ollama connectivity). Check `docker-compose logs` for these preflight messages to confirm the environment matches expectations.
-- Use `docker-compose down` to stop the app, then `docker-compose up --build` if you’ve made code changes that require a rebuild.
-- If you edit `app.py`, restart the service (`docker-compose restart app_service`) or run `uvicorn app:app --reload` for rapid iteration outside Docker.
+- Stop the container (`docker-compose down`) before deleting `tasks.db` or `checkpoints.sqlite` to avoid SQLite locks. Removing them resets the entire queue. `docker-compose down -v` also removes the `app_data` volume that stores these files.
+- Backup strategy: copy both SQLite files to a timestamped folder before destructive changes. The CSV export is lightweight, but the dual SQLite files capture all in-flight state.
+- The app warns if the checkpoint data directory is missing or unwritable; it attempts to create the parent folder during startup (`log_environment_status`), so verify Docker can write to the mounted volume (`/data` in the container).
 
-## Database Hygiene
+## Configuration & Env Vars
 
-- Remove `tasks.db` or `checkpoints.sqlite` when you need to reset the system or switch graph state definitions. Always stop the Docker service before deleting them to avoid SQLite locks.
-- Backups can simply be zipped copies of both files. For longer-lived data, consider periodically copying them to a `backups/` folder with timestamps.
+- Set `PERPLEXITY_API_KEY` to unlock sonar-pro research. Without it, the research agent falls back to DuckDuckGo (`ddgs`) and logs the fallback.
+- Preference order: `OLLAMA_REASONING_MODEL` for planning/QA, `OLLAMA_CODING_MODEL` for UX/engineering/code, `OLLAMA_MODEL` as a legacy fallback. Use `OLLAMA_BASE_URL` if Ollama runs on a nonstandard host; the app defaults to `http://host.docker.internal:11434`.
+- Override `DATABASE_URL` and `CHECKPOINTS_PATH` (usually `sqlite:///tasks.db` and `sqlite+aiosqlite:///checkpoints.sqlite`) via `.env` or Docker Compose environment variables if you want to store data in a custom location.
 
-## Operations Notes
+## Debugging Tips
 
-- Approvals are the single source of truth for the graph state. When a task pauses, the UI, `tasks.db`, and `checkpoints.sqlite` all point to the same status label (`pending_research_approval`, `pending_prd_approval`, etc.).
-- Runtime configuration (Perplexity API key, Ollama URL/model, DB paths) now lives in `.env`. Update that file and run `docker-compose up -d` to apply changes without editing code; keep secrets out of source control by only committing `.env.example`.
-- For manual testing, you can post to `/respond_to_approval` with a JSON body like `{"task_id":"<id>", "approved":true}` if you need to simulate human approvals via Postman or curl.
-- Document any future maintenance steps (e.g., upgrading dependencies in `requirements.txt`) inside this doc to keep the operations runbook centralized.
+- If an endpoint fails, check the logs for parsing errors (`_extract_json`)—Ollama occasionally wraps JSON in stray text, and the helper method tries to recover valid JSON.
+- Whenever you edit `app.py`, rebuild the container (`docker-compose up -d --build`). For rapid iteration outside Docker, run `uvicorn app:app --reload` from a Python virtual environment.
+- Keep an eye on the UI’s console/polling logs (`index.html` uses `console.error` for polling issues) so you know if the approval queue unexpectedly becomes empty or stuck.
+
+Document new observability steps here (e.g., additional exports, alerting hooks) so the ops runbook stays current.
