@@ -167,6 +167,137 @@ def log_environment_status():
         logger.warning("Unable to reach Ollama at %s: %s", OLLAMA_BASE_URL, exc)
 
 
+
+def call_perplexity_json(
+    system_prompt: str, user_prompt: str, json_schema: dict
+) -> Optional[dict]:
+    if not PERPLEXITY_API_KEY:
+        return None
+
+    payload = {
+        "model": "sonar-pro",
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        "response_format": {"type": "json_schema", "json_schema": json_schema},
+    }
+
+    headers = {
+        "Authorization": f"Bearer {PERPLEXITY_API_KEY}",
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
+
+    start_time = time.time()
+    with httpx.Client(timeout=90) as client:
+        response = client.post(PERPLEXITY_API_URL, headers=headers, json=payload)
+        if response.status_code >= 400:
+            logger.error(
+                "Perplexity API error %s: %s",
+                response.status_code,
+                response.text[:500],
+            )
+        data = response.json()
+
+    duration = time.time() - start_time
+    usage = data.get("usage", {})
+    input_tokens = usage.get("prompt_tokens", 0)
+    output_tokens = usage.get("completion_tokens", 0)
+
+    logger.info(
+        f"Perplexity call took {duration:.2f}s. "
+        f"Tokens: Input={input_tokens}, Output={output_tokens}"
+    )
+
+    content = data.get("choices", [{}])[0].get("message", {}).get("content")
+    if not content:
+        return None
+
+    return _extract_json(content)
+
+
+def _get_ollama_model(reasoning: bool) -> Optional[str]:
+    model = OLLAMA_REASONING_MODEL if reasoning else OLLAMA_CODING_MODEL
+    if not model:
+        model = OLLAMA_MODEL
+    return model
+
+
+def call_ollama_json(
+    system_prompt: str,
+    user_prompt: str,
+    json_schema: object,
+    *,
+    reasoning: bool = False,
+) -> Optional[dict]:
+    model = _get_ollama_model(reasoning)
+    if not model:
+        logger.warning("No Ollama model configured for reasoning=%s.", reasoning)
+        return None
+
+    payload = {
+        "model": model,
+        "system": system_prompt,
+        "prompt": user_prompt,
+        "format": json_schema,
+        "stream": False,
+        # "think": reasoning,
+    }
+
+    logger.info("Calling Ollama model %s (reasoning=%s).", model, reasoning)
+
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            start_time = time.time()
+            with httpx.Client(timeout=300) as client:
+                response = client.post(f"{OLLAMA_BASE_URL}api/generate", json=payload)
+                response.raise_for_status()
+                data = response.json()
+            duration = time.time() - start_time
+
+            input_tokens = data.get("prompt_eval_count", 0)
+            output_tokens = data.get("eval_count", 0)
+
+            logger.info(
+                f"Ollama call took {duration:.2f}s. "
+                f"Tokens: Input={input_tokens}, Output={output_tokens}"
+            )
+            
+            content = data.get("response")
+            if not content:
+                return None
+
+            return _extract_json(content)
+
+        except httpx.TimeoutException as exc:
+            logger.warning(f"Ollama request timed out (attempt {attempt + 1}/{max_retries}): {exc}")
+            if attempt + 1 == max_retries:
+                logger.error("Ollama request failed after max retries.")
+                return None
+            time.sleep(5)  # Wait for 5 seconds before retrying
+        except Exception as exc:
+            logger.exception("Ollama request failed: %s", exc)
+            return None
+
+    return None
+
+
+def _extract_json(content: str) -> Optional[dict]:
+    try:
+        return json.loads(content)
+    except json.JSONDecodeError:
+        start = content.find("{")
+        end = content.rfind("}")
+        if start != -1 and end != -1:
+            try:
+                return json.loads(content[start : end + 1])
+            except json.JSONDecodeError:
+                return None
+    return None
+
+
 def run_research_query(product_idea: str) -> str:
     """Use Perplexity for research; fall back to DuckDuckGo if unavailable."""
     if PERPLEXITY_API_KEY:
@@ -241,126 +372,6 @@ def query_perplexity(product_idea: str) -> Optional[str]:
         return None
 
     return format_structured_summary(parsed)
-
-
-def call_perplexity_json(
-    system_prompt: str, user_prompt: str, json_schema: dict
-) -> Optional[dict]:
-    if not PERPLEXITY_API_KEY:
-        return None
-
-    payload = {
-        "model": "sonar-pro",
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
-        "response_format": {"type": "json_schema", "json_schema": json_schema},
-    }
-
-    headers = {
-        "Authorization": f"Bearer {PERPLEXITY_API_KEY}",
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-    }
-
-    start_time = time.time()
-    with httpx.Client(timeout=90) as client:
-        response = client.post(PERPLEXITY_API_URL, headers=headers, json=payload)
-        if response.status_code >= 400:
-            logger.error(
-                "Perplexity API error %s: %s",
-                response.status_code,
-                response.text[:500],
-            )
-        response.raise_for_status()
-        data = response.json()
-
-    duration = time.time() - start_time
-    usage = data.get("usage", {})
-    input_tokens = usage.get("prompt_tokens", 0)
-    output_tokens = usage.get("completion_tokens", 0)
-
-    logger.info(
-        f"Perplexity call took {duration:.2f}s. "
-        f"Tokens: Input={input_tokens}, Output={output_tokens}"
-    )
-
-    content = data.get("choices", [{}])[0].get("message", {}).get("content")
-    if not content:
-        return None
-
-    return _extract_json(content)
-
-
-def _get_ollama_model(reasoning: bool) -> Optional[str]:
-    model = OLLAMA_REASONING_MODEL if reasoning else OLLAMA_CODING_MODEL
-    if not model:
-        model = OLLAMA_MODEL
-    return model
-
-
-def call_ollama_json(
-    system_prompt: str,
-    user_prompt: str,
-    json_schema: object,
-    *,
-    reasoning: bool = False,
-) -> Optional[dict]:
-    model = _get_ollama_model(reasoning)
-    if not model:
-        logger.warning("No Ollama model configured for reasoning=%s.", reasoning)
-        return None
-
-    payload = {
-        "model": model,
-        "system": system_prompt,
-        "prompt": user_prompt,
-        "format": json_schema,
-        "stream": False,
-#        "think": reasoning,
-    }
-
-    logger.info("Calling Ollama model %s (reasoning=%s).", model, reasoning)
-
-    try:
-        start_time = time.time()
-        with httpx.Client(timeout=300) as client:
-            response = client.post(f"{OLLAMA_BASE_URL}api/generate", json=payload)
-            response.raise_for_status()
-            data = response.json()
-        duration = time.time() - start_time
-
-        input_tokens = data.get("prompt_eval_count", 0)
-        output_tokens = data.get("eval_count", 0)
-
-        logger.info(
-            f"Ollama call took {duration:.2f}s. "
-            f"Tokens: Input={input_tokens}, Output={output_tokens}"
-        )
-    except Exception as exc:
-        logger.exception("Ollama request failed: %s", exc)
-        return None
-
-    content = data.get("response")
-    if not content:
-        return None
-
-    return _extract_json(content)
-
-
-def _extract_json(content: str) -> Optional[dict]:
-    try:
-        return json.loads(content)
-    except json.JSONDecodeError:
-        start = content.find("{")
-        end = content.rfind("}")
-        if start != -1 and end != -1:
-            try:
-                return json.loads(content[start : end + 1])
-            except json.JSONDecodeError:
-                return None
-    return None
 
 
 def format_structured_summary(data: dict) -> str:
@@ -775,7 +786,11 @@ def generate_engineering_spec(
 
     if not reasoning_parsed or not reasoning_parsed.get("reasoning_steps"):
         logger.error("... Failed to generate reasoning steps.")
-        return "Spec unavailable"
+        return json.dumps({
+            "reasoning_steps": ["Failed to generate reasoning steps."],
+            "schemas": [],
+            "endpoints": []
+        }, indent=2)
 
     reasoning_steps = reasoning_parsed["reasoning_steps"]
     logger.info("... Architect reasoning steps generated successfully.")
@@ -845,7 +860,11 @@ def generate_engineering_spec(
 
     if not contract_parsed or not contract_parsed.get("schemas") or not contract_parsed.get("endpoints"):
         logger.error("... Failed to generate API contract from reasoning steps.")
-        return "Spec unavailable"
+        return json.dumps({
+            "reasoning_steps": reasoning_steps,
+            "schemas": [],
+            "endpoints": []
+        }, indent=2)
 
     # --- Step 3: Combine and return the full spec ---
     full_spec = {
@@ -930,7 +949,7 @@ def generate_engineering_code(
     product_idea: str,
     user_stories: str | None,
     wireframe_html: str | None,
-    spec_text: str | None,
+    spec_contract: str | None,
 ) -> tuple[str, str]:
     code_schema = {
         "type": "object",
@@ -962,7 +981,7 @@ def generate_engineering_code(
     {wireframe_html or 'Unavailable.'}
 
     Architecture Spec (implement exactly these models and endpoints):
-    {spec_text or 'Unavailable.'}
+    {spec_contract or 'Unavailable.'}
 
     Now write the Python code!
     """
@@ -975,7 +994,7 @@ def generate_engineering_code(
 def run_engineering_qa_review(
     product_idea: str,
     user_stories: str | None,
-    spec_text: str | None,
+    spec_contract: str | None,
     engineering_code: str | None,
 ) -> str:
     qa_schema = {
@@ -1013,7 +1032,7 @@ def run_engineering_qa_review(
     user_prompt = f"""
     Product idea: {product_idea}
     User stories: {user_stories or 'Unavailable.'}
-    Architetural Spec: {spec_text or 'Unavailable.'}
+    Architetural Spec: {spec_contract or 'Unavailable.'}
 
     Prototype code to review:
     {engineering_code or 'Unavailable.'}
@@ -1203,6 +1222,7 @@ def engineering_node(state: AgentState):
     file_name, code = generate_engineering_code(
         state['product_idea'],
         state.get('user_stories'),
+        state.get('wireframe_html'),
         spec_contract, # Pass only the contract
     )
     state['engineering_file_name'] = file_name or "main.py"
@@ -1455,37 +1475,6 @@ def build_state_from_task(db_task: Task) -> AgentState:
         "last_rejected_step": db_task.last_rejected_step,
     }
 
-
-async def _reset_graph_to_step(task_id: str, step: str, checkpointer: AsyncSqliteSaver):
-    """
-    Manually resets the graph's checkpoint history to a specific step.
-    This is crucial for resubmission, as it forces the graph to "forget"
-    it has already completed the step and subsequent steps.
-    """
-    config = {"configurable": {"thread_id": task_id}}
-    # The .get() method on the checkpointer, when called with just the thread_id,
-    # returns the full history of checkpoints for that thread.
-    checkpoint_tuples = await checkpointer.aget(config)
-    if not checkpoint_tuples:
-        return
-
-    # Find the index of the last time the target step was completed
-    last_occurrence_idx = -1
-    for i, checkpoint_tuple in enumerate(checkpoint_tuples):
-        # The checkpoint is a JSON string, so we need to load it first.
-        try:
-            checkpoint_dict = json.loads(checkpoint_tuple.checkpoint)
-            if checkpoint_dict.get("name") == step:
-                last_occurrence_idx = i
-        except (json.JSONDecodeError, AttributeError):
-            continue # Ignore malformed checkpoints
-
-    if last_occurrence_idx != -1:
-        # If the step was found, truncate the history to that point
-        new_checkpoint_tuples = checkpoint_tuples[:last_occurrence_idx]
-        await checkpointer.aput(config, new_checkpoint_tuples)
-        logger.info(f"Rewound graph history for task {task_id} to before step '{step}'.")
-
 # --- API Endpoints (Refactored) ---
 @app.post("/start_task", response_model=TaskStatus)
 async def start_task(request: StartTaskRequest, db: Session = Depends(get_db)):
@@ -1532,7 +1521,7 @@ async def start_task(request: StartTaskRequest, db: Session = Depends(get_db)):
 
     # 4. Get the state of the graph at the interruption point
     interrupted_state = await graph.aget_state(config)
-    logger.info(f"Current graph state for task {task_id}: {interrupted_state.values}")
+    # logger.info(f"Current graph state for task {task_id}: {interrupted_state.values}")
 
     # 5. Update our application DB with the new status from the graph
     db_task.status = interrupted_state.values['status']
@@ -1752,47 +1741,46 @@ async def resubmit_step(request: ResubmitRequest, db: Session = Depends(get_db))
     if db_task.last_rejected_step != request.step:
         raise HTTPException(status_code=400, detail="Resubmit step does not match last rejection.")
 
-    logger.info("Resubmitting task %s for step %s", request.task_id, request.step)
-    graph = get_app_graph()
-    config = {"configurable": {"thread_id": request.task_id}}
+    # This logic is based on the original, working implementation from app_old.py
+    # It directly calls the node function instead of manipulating the graph state.
+    logger.info(f"Task {request.step} resubmitted for a re-run")
 
-    # 1. Clear downstream artifacts in the database to ensure a clean run
     clear_artifacts_for_step(db_task, request.step)
-    db.commit()
-    db.refresh(db_task)
+    state = build_state_from_task(db_task)
+    state["status"] = STEP_STATUS_MAP[request.step]
+    state["pending_approval_content"] = None
 
-    # This is the most important step: we must rewind the graph's history
-    # to force it to re-run the rejected step.
-    await _reset_graph_to_step(request.task_id, request.step, memory_saver)
+    step_fn_map = {
+        "research": research_node,
+        "product_prd": product_prd_node,
+        "product_stories": product_stories_node,
+        "ux_design": ux_design_node,
+        "engineering_spec": engineering_spec_node,
+        "engineering_code": engineering_node,
+    }
+    step_fn = step_fn_map.get(request.step)
+    if not step_fn:
+        raise HTTPException(status_code=400, detail="Unsupported step for resubmission.")
 
-    # 2. Get the current graph state and update it for resubmission
-    current_state = await graph.aget_state(config)
-    state_to_update = build_state_from_task(db_task)
-    state_to_update["status"] = "resubmitting" # A transient status
-    await graph.aupdate_state(config, state_to_update)
+    # Manually run the agent node to regenerate artifacts
+    updated_state = step_fn(state)
 
-    # 3. Invoke the graph starting from the resubmitted step. The `from_node`
-    # parameter forces the graph to rewind and start execution from this specific node,
-    # ignoring its previous position. It will then run until the next interruption.
-    final_state = await graph.ainvoke(None, config, from_node=request.step)
-    logger.info(f"Graph for task {request.task_id} advanced to state '{final_state.get('status')}' after resubmission.")
-
-    # 4. Update the database with the new state from the graph
-    db_task.status = final_state.get('status', db_task.status)
-    db_task.pending_approval_content = final_state.get('pending_approval_content')
+    # Update the database with the new state from the direct node call
+    db_task.status = updated_state.get("status", db_task.status)
+    db_task.pending_approval_content = updated_state.get("pending_approval_content")
     artifact_fields = list(AgentState.__annotations__.keys())
     for field in artifact_fields:
-        if field in ['task_id', 'product_idea']:
+        if field in ['task_id', 'product_idea', 'status', 'pending_approval_content']:
             continue
-        if final_state and final_state.get(field):
-            setattr(db_task, field, final_state.get(field))
+        if updated_state.get(field):
+            setattr(db_task, field, updated_state.get(field))
 
     db_task.last_rejected_step = None
     db_task.last_rejected_at = None
     db.commit()
     db.refresh(db_task)
     
-    logger.info("Task %s resubmitted and updated in DB to status '%s'", request.task_id, db_task.status)
+    logger.info("Task %s resubmitted for step %s, status is now %s", request.task_id, request.step, db_task.status)
     return TaskStatus.from_orm(db_task)
 
 # --- Static File and Status Endpoints ---
