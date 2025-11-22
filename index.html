@@ -622,7 +622,7 @@
             { key: 'pending_story_approval', label: 'User Stories', description: 'Stories & ACs' },
             { key: 'pending_ux_approval', label: 'UX Design', description: 'Flows & wireframes' },
             { key: 'pending_spec_approval', label: 'Eng. Spec', description: 'API spec & QA' },
-            { key: 'pending_code_approval', label: 'Eng. Code', description: 'Code prototype' },
+            { key: 'pending_code_approval', label: 'Eng. Code', description: 'Code prototype & QA' },
             { key: 'ready_for_gtm', label: 'GTM Handoff', description: 'Ready for launch docs' },
             { key: 'completed', label: 'Shipped', description: 'Final deliverables' },
             { key: 'rejected', label: 'Rejected', description: 'Manual review' },
@@ -805,8 +805,8 @@
             renderFlowDiagram(null);
             renderWireframe(null);
             renderArtifact(engineeringSpec, null);
-            renderEngineeringPrototype(null, null);
             renderArtifact(engineeringSpecQa, null);
+            renderEngineeringPrototype(null, null);
             renderArtifact(engineeringQa, null);
         }
 

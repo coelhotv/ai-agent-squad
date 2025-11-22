@@ -318,7 +318,7 @@ def call_ollama_json(
         "prompt": user_prompt,
         "format": json_schema,
         "stream": False,
-        "think": reasoning,
+#        "think": reasoning,
     }
 
     logger.info("Calling Ollama model %s (reasoning=%s).", model, reasoning)
@@ -737,15 +737,52 @@ def generate_engineering_spec(
     product_idea: str,
     user_stories: str | None,
     user_flow_diagram: str | None,
+    qa_feedback: str | None = None,
 ) -> str:
-    spec_schema = {
+    # --- Step 1: Generate the reasoning steps with the reasoning model ---
+    reasoning_schema = {
         "type": "object",
         "properties": {
             "reasoning_steps": {
                 "type": "array",
                 "description": "Explain your step-by-step plan to meet all user stories and acceptance criteria before defining schemas.",
                 "items": {"type": "string"},
-            },
+            }
+        },
+        "required": ["reasoning_steps"],
+    }
+    reasoning_system_prompt = (
+        "You are a Senior Software Architect specializing in FastAPI, Pydantic v2, and uvicorn.\n"
+        "Your plan must cover every AC and include all necessary CRUD endpoints for core resources like Users and Rewards. "
+        "Think about the complete lifecycle of the data."
+    )
+    reasoning_user_prompt = f"""
+    Product idea: {product_idea}
+    
+    User stories and AC:
+    {user_stories or 'Unavailable.'}
+
+    User flow diagram (Mermaid):
+    {user_flow_diagram or 'Unavailable.'}
+
+    {'Previous attempt QA feedback: ' + qa_feedback if qa_feedback else ''}
+
+    Now, provide the `reasoning_steps` for designing the API.
+    """
+    logger.info("... Generating architect reasoning steps with reasoning model.")
+    reasoning_parsed = call_ollama_json(reasoning_system_prompt, reasoning_user_prompt, reasoning_schema, reasoning=True)
+
+    if not reasoning_parsed or not reasoning_parsed.get("reasoning_steps"):
+        logger.error("... Failed to generate reasoning steps.")
+        return "Spec unavailable"
+
+    reasoning_steps = reasoning_parsed["reasoning_steps"]
+    logger.info("... Architect reasoning steps generated successfully.")
+
+    # --- Step 2: Generate the schemas and endpoints with the coding model ---
+    contract_schema = {
+        "type": "object",
+        "properties": {
             "schemas": {
                 "type": "array",
                 "items": {
@@ -776,9 +813,6 @@ def generate_engineering_spec(
                     "properties": {
                         "method": {"type": "string"},
                         "path": {"type": "string"},
-                        "path_params": {"type": "array", "items": {"type": "string"}},
-                        "query_params": {"type": "array", "items": {"type": "string"}},
-                        "body_model": {"type": ["string", "null"]},
                         "response_model": {"type": "string"},
                         "errors": {"type": "array", "items": {"type": "string"}},
                     },
@@ -786,36 +820,40 @@ def generate_engineering_spec(
                 },
             },
         },
-        "required": ["reasoning_steps", "schemas", "endpoints"],
+        "required": ["schemas", "endpoints"],
     }
-    system_prompt = (
-        "You are a Senior Software Architect specializing in FastAPI, Pydantic v2, and uvicorn.\n"
-        "First, write down your reasoning steps. Then, define the interface contract. Output JSON matching the provided schema exactly.\n"
-        "Your plan must explicitly cover every AC. Your final spec must be self-contained and consistent.\n"
-        "1. **reasoning_steps**: Explain how your API design will satisfy each user story and AC.\n"
-        "2. **schemas**: Define ALL Pydantic v2 models, including any custom response models used by endpoints. Use `field_validator` for custom validation logic.\n"
-        "3. **endpoints**: Define RESTful endpoints. Paths for user-specific data MUST be nested under `/users/{user_id}/`. For example, `POST /users/{user_id}/xyz/` is correct; `POST /xyz/` is incorrect.\n"
-        "CRITICAL CHECKS:\n"
-        "- Ensure every model mentioned in an endpoint's `response_model` is defined in the `schemas` list.\n"
-        "- Ensure all paths that create or retrieve user-specific data are correctly nested under a user path parameter.\n"
-        "Include parent lifecycle endpoints if referenced (e.g., users/teams). Plan for 404 (Not Found) and 400 (Invalid Data) errors.\n"
-        "Do NOT write implementation logic."
+    contract_system_prompt = (
+        "You are a specialist API designer. Your job is to generate the JSON for API schemas and endpoints based *exactly* on the provided reasoning steps.\n"
+        "RULES:\n"
+        "1. Implement every step from the reasoning plan.\n"
+        "2. Define all Pydantic v2 models in the `schemas` list.\n"
+        "3. Define all RESTful endpoints in the `endpoints` list.\n"
+        "4. Ensure every model used in an endpoint's `response_model` is defined in `schemas`.\n"
+        "5. Output only the JSON structure."
     )
-    user_prompt = f"""
-    Product idea: {product_idea}
+    contract_user_prompt = f"""
+    Architect's Plan (Reasoning Steps):
+    - {"- ".join(reasoning_steps)}
+
+    {'Previous attempt QA feedback: ' + qa_feedback if qa_feedback else ''}
     
-    User stories and AC:
-    {user_stories or 'Unavailable.'}
-
-    User flow (Mermaid) for context:
-    {user_flow_diagram or 'Unavailable.'}
-
-    Now, design the data schemas and API endpoints needed.
+    Now, generate the `schemas` and `endpoints` JSON based on this plan.
     """
-    parsed = call_ollama_json(system_prompt, user_prompt, spec_schema)
-    if parsed and parsed.get("schemas") and parsed.get("endpoints"):
-        return json.dumps(parsed, indent=2)
-    return "Spec unavailable"
+    logger.info("... Generating API contract with coding model.")
+    contract_parsed = call_ollama_json(contract_system_prompt, contract_user_prompt, contract_schema)
+
+    if not contract_parsed or not contract_parsed.get("schemas") or not contract_parsed.get("endpoints"):
+        logger.error("... Failed to generate API contract from reasoning steps.")
+        return "Spec unavailable"
+
+    # --- Step 3: Combine and return the full spec ---
+    full_spec = {
+        "reasoning_steps": reasoning_steps,
+        "schemas": contract_parsed["schemas"],
+        "endpoints": contract_parsed["endpoints"],
+    }
+
+    return json.dumps(full_spec, indent=2)
 
 
 def run_spec_qa_review(
@@ -832,7 +870,10 @@ def run_spec_qa_review(
                 "items": {
                     "type": "object",
                     "properties": {
-                        "severity": {"type": "string", "enum": ["critical", "major", "minor"]},
+                        "severity": {
+                            "type": "string",
+                            "enum": ["critical", "major", "minor"],
+                        },
                         "title": {"type": "string"},
                         "details": {"type": "string"},
                     },
@@ -843,9 +884,14 @@ def run_spec_qa_review(
         "required": ["verdict", "findings"],
     }
     system_prompt = (
-        "You are a Senior QA Engineer reviewing an API specification against user stories. Your job is to find logical gaps before any code is written.\n"
-        "Focus on: Is the API complete? Can all Acceptance Criteria be met with the defined endpoints? Are there missing CRUD operations (e.g., creating a user, creating a notification)? Is the purpose of each endpoint clear?\n"
-        "Output JSON only. Be concise and actionable."
+        "You are a meticulous QA Engineer. Your job is to review the provided API specification against the user stories and acceptance criteria (AC).\n"
+        "Your task is to find critical flaws in the *existing* spec. DO NOT generate a new spec.\n"
+        "RULES:\n"
+        "1. **Focus on Critical Gaps**: Only report 'critical' findings where an acceptance criterion is completely un-meetable.\n"
+        "2. **No Duplicates**: Do not report the same issue multiple times with different wording.\n"
+        "3. **Be Actionable**: Findings should point to a missing or incorrect endpoint or schema, not abstract logic.\n"
+        "4. **Be Concise**: Keep the 'details' for each finding to a maximum of two short sentences.\n"
+        "5. **Output JSON**: Your entire response must be in the specified JSON format."
     )
     user_prompt = f"""
     Product idea: {product_idea}
@@ -853,11 +899,14 @@ def run_spec_qa_review(
     Architecture Spec to review:
     {spec_text or 'Unavailable.'}
 
-    Does this spec fully cover the user stories? Identify any critical or major gaps.
+    Review the spec against this checklist:
+    1. **Completeness**: Does the spec define ALL endpoints and schemas needed to satisfy every single Acceptance Criterion?
+    2. **CRUD for Core Resources**: Does the spec include basic Create, Read, Update, and Delete endpoints for primary resources mentioned (like Users, Rewards)?
     """
+    # Use the REASONING model for this logical review task.
     parsed = call_ollama_json(system_prompt, user_prompt, qa_schema, reasoning=True)
     if not parsed:
-        return json.dumps({"verdict": "fail", "findings": [{"severity": "critical", "title": "QA Failure", "details": "Could not generate a structured QA response for the spec."}]})
+        return json.dumps({"verdict": "fail", "findings": [{"severity": "critical", "title": "QA Failure", "details": "Could not generate a structured QA response for the spec."}] }, indent=2)
     return json.dumps(parsed, indent=2)
 
 def generate_engineering_code_from_spec(
@@ -877,13 +926,13 @@ def generate_engineering_code_from_spec(
     system_prompt = (
         "You are a Senior Python Engineer. Implement the provided spec in a single-file FastAPI app.\n"
         "RULES:\n"
-        "1) Implement every model/endpoint from the spec; do not add extra features.\n"
-        "2) Use FastAPI + Pydantic v2 (`field_validator`/`BaseModel`), built-in generics, and uvicorn.\n"
-        "3) Use JSON bodies for POST/PUT/PATCH. Align path params in decorators/signatures.\n"
-        "4) Include CORSMiddleware (restrain origins like ['http://localhost:8000']), health/status endpoint, and note in-memory storage is demo-only.\n"
-        "5) Add validation, duplicate checks, and conflict/missing-resource handling per the spec; include parent lifecycle endpoints if referenced.\n"
-        "6) Use logging inside handlers. Avoid auth/session layers and SQL unless the spec requires them; prefer simple in-memory storage.\n"
-        "7) **Return raw JSON** with file_name + code only (no Markdown). Guard uvicorn with if __name__ == '__main__'.\n"
+        "1- Implement every model/endpoint from the spec; do not add extra features.\n"
+        "2- Use FastAPI + Pydantic v2 (`field_validator`/`BaseModel`), built-in generics, and uvicorn.\n"
+        "3- Use JSON bodies for POST/PUT/PATCH. Align path params in decorators/signatures.\n"
+        "4- Include CORSMiddleware (restrain origins like ['http://localhost:8000']), health/status endpoint, and note in-memory storage is demo-only.\n"
+        "5- Add validation, duplicate checks, and conflict/missing-resource handling per the spec; include parent lifecycle endpoints if referenced.\n"
+        "6- Use logging inside handlers. Avoid auth/session layers and SQL unless the spec requires them; prefer simple in-memory storage.\n"
+        "7- **Return raw JSON** with file_name + code only (no Markdown). Guard uvicorn with if __name__ == '__main__'.\n"
     )
     user_prompt = f"""
     Product idea: {product_idea}
@@ -936,7 +985,7 @@ def run_engineering_qa_review(
         "Output JSON only. Focus on: schema/endpoint alignment with the spec, validation (field_validator, positive numbers, enums), "
         "conflict/missing-resource handling, logging usage, and correct CORS configuration. "
         "Ensure CRUD/API surfaces from the spec exist, path params match, and no extra auth/SQL is added if not required. "
-        "Be concise and actionable."
+        "Be concise and actionable. Keep the 'details' for each finding to a maximum of two short sentences."
     )
     user_prompt = f"""
     Product idea: {product_idea}
@@ -1078,30 +1127,51 @@ def ux_design_node(state: AgentState):
 def engineering_spec_node(state: AgentState):
     logger.info(f"--- Node: engineering_spec_node (Task ID: {state['task_id']}) ---")
 
-    # 1. Run the architect to generate the spec
-    logger.info("... Running architect to generate spec")
-    spec = generate_engineering_spec(
-        state['product_idea'],
-        state.get('user_stories'),
-        state.get('user_flow_diagram'),
-    )
-    state['engineering_spec'] = spec
+    max_retries = 2
+    qa_feedback = "" # Store feedback for retries
+    for attempt in range(max_retries):
+        # 1. Run the architect to generate the spec
+        logger.info(f"... Running architect to generate spec (Attempt {attempt + 1}/{max_retries})")
+        spec = generate_engineering_spec(
+            state['product_idea'],
+            state.get('user_stories'),
+            state.get('user_flow_diagram'),
+            state.get('qa_feedback'),
+            # On retries, include the QA feedback
+            # qa_feedback, 
+        )
+        state['engineering_spec'] = spec
 
-    # 2. Run QA review on the generated spec
-    logger.info("... Running QA to review spec")
-    qa_review_json = run_spec_qa_review(
-        state['product_idea'],
-        state.get('user_stories'),
-        spec,
-    )
-    state['engineering_spec_qa'] = qa_review_json
+        # 2. Run QA review on the generated spec
+        logger.info("... Running QA to review spec")
+        qa_review_json = run_spec_qa_review(
+            state['product_idea'],
+            state.get('user_stories'),
+            spec,
+        )
+        state['engineering_spec_qa'] = qa_review_json
+        review = json.loads(qa_review_json)
 
-    # 3. Set status for HITL approval
+        # 3. Check the verdict
+        if review.get("verdict") == "pass":
+            logger.info("... QA spec review passed. Proceeding to HITL approval.")
+            state['status'] = "pending_spec_approval"
+            state['pending_approval_content'] = (
+                "Architect has produced an API specification and QA has reviewed it. "
+                "Approve to proceed to implementation."
+            )
+            return state
+        
+        logger.warning(f"... QA spec review failed. Findings: {review.get('findings')}")
+        # If it fails, format the findings to be included in the next prompt.
+        findings = review.get("findings", [])
+        if findings:
+            feedback_points = [f"- {f.get('title')}: {f.get('details')}" for f in findings]
+            qa_feedback = "The previous spec failed QA. Address these critical issues:\n" + "\n".join(feedback_points)
+
+    logger.error("... Max retries reached for spec generation. Failing for HITL.")
     state['status'] = "pending_spec_approval"
-    state['pending_approval_content'] = (
-        "Architect has produced an API specification and QA has reviewed it. "
-        "Approve to proceed to implementation."
-    )
+    state['pending_approval_content'] = "Spec generation failed after multiple QA reviews. Manual intervention required."
     return state
 
 
@@ -1115,6 +1185,16 @@ def developer_node(state: AgentState):
     )
     state['engineering_file_name'] = file_name or "main.py"
     state['engineering_code'] = code or "# Code generation failed"
+
+    logger.info("... Running QA to review code")
+    qa_review = run_engineering_qa_review(
+        state['product_idea'],
+        state.get('user_stories'),
+        state.get('engineering_spec'),
+        code,
+    )
+    state['engineering_qa'] = qa_review or "QA review failed"
+
     state['status'] = "pending_code_approval"
     state['pending_approval_content'] = (
         "Developer has implemented the spec. Review the code and approve to complete."
@@ -1208,9 +1288,9 @@ class TaskStatus(BaseModel):
     user_flow_diagram: Optional[str] = None
     wireframe_html: Optional[str] = None
     engineering_spec: Optional[str] = None
+    engineering_spec_qa: Optional[str] = None
     engineering_file_name: Optional[str] = None
     engineering_code: Optional[str] = None
-    engineering_spec_qa: Optional[str] = None
     engineering_qa: Optional[str] = None
     last_rejected_step: Optional[str] = None
     last_rejected_at: Optional[str] = None
@@ -1225,6 +1305,7 @@ class ArtifactUpdate(BaseModel):
     user_flow_diagram: Optional[str] = None
     wireframe_html: Optional[str] = None
     engineering_spec: Optional[str] = None
+    engineering_spec_qa: Optional[str] = None
     engineering_file_name: Optional[str] = None
     engineering_code: Optional[str] = None
     engineering_qa: Optional[str] = None
@@ -1269,9 +1350,9 @@ def apply_artifact_overrides(task_id: str, overrides: ArtifactUpdate, db: Sessio
         "user_flow_diagram",
         "wireframe_html",
         "engineering_spec",
+        "engineering_spec_qa",
         "engineering_file_name",
         "engineering_code",
-        "engineering_spec_qa",
         "engineering_qa",
     ):
         value = getattr(overrides, field)
@@ -1335,8 +1416,8 @@ def clear_artifacts_for_step(db_task: Task, step: str):
             "wireframe_html",
             "engineering_file_name",
             "engineering_spec",
-            "engineering_file_name",
             "engineering_spec_qa",
+            "engineering_file_name",
             "engineering_code",
             "engineering_qa",
         ],
@@ -1348,8 +1429,6 @@ def clear_artifacts_for_step(db_task: Task, step: str):
             "engineering_qa",
         ],
         "engineering": [
-            "engineering_spec",
-            "engineering_spec_qa",
             "engineering_file_name",
             "engineering_code",
             "engineering_qa",
