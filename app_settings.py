@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     perplexity_api_url: AnyUrl = Field(
         "https://api.perplexity.ai/chat/completions", env="PERPLEXITY_API_URL"
     )
+    run_locally: bool = Field(False, env="RUN_LOCALLY")
 
     class Config:
         env_file = ".env"

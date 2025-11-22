@@ -5,6 +5,8 @@ from io import StringIO
 # --- Core Imports ---
 import uuid
 import logging
+import socket
+import uvicorn
 import time
 from contextlib import AsyncExitStack
 
@@ -769,12 +771,11 @@ def generate_engineering_spec(
         "2. **NO PRODUCTION FEATURES**: You are FORBIDDEN from including: real authentication (JWT/OAuth), persistent databases (use in-memory only), background tasks (Celery/cron), or unit tests. Mentioning these will fail the task.\n"
         "3. **SIMULATE, DON'T BUILD**: For user-specific data, assume a single, hardcoded user. For reminders, the endpoint can simply return a static list; no scheduling logic is needed.\n"
         "4. **ADDRESS EVERY AC**: Your plan must state how each acceptance criterion will be met with a specific schema or endpoint.\n"
-        "5. **DATA FIRST**: Define the Pydantic schemas and their critical fields first.\n"
-        "6. **CORE CONTRACT**: Your spec must define UserSchema, DailyLogSchema (with `date`, `cigarettes`, `mood`, and `triggers`), MoodSchema, TriggerSchema, DashboardDataSchema, PatternAnalysisSchema, and CopingStrategySchema plus the endpoints /api/v1/daily_log, /api/v1/dashboard, /api/v1/patterns, and /api/v1/copings. Explain how these structures satisfy the acceptance criteria before elaborating on other demo details."
+        "5. **DATA FIRST**: Define the Pydantic schemas and their critical fields first. Your primary goal is to model the data structures needed to satisfy the user stories."
     )
     reasoning_user_prompt = f"""
     Product idea: {product_idea}
-    
+
     User stories and AC:
     {user_stories or 'Unavailable.'}
 
@@ -912,8 +913,8 @@ def run_spec_qa_review(
         "2. **Ignore Production Concerns**: DO NOT fail the spec for missing `UPDATE`/`DELETE` endpoints, lack of authentication, or other production-level features. These are out of scope for a demo.\n"
         "3. **Be Actionable**: Findings must point to a specific missing or incorrect part of the spec.\n"
         "4. **Be Concise**: Keep the 'details' for each finding to one or two short sentences.\n"
-        "5. **Output JSON**: Your entire response must be in the specified JSON format."
-        "6. **Contract Requirements**: Fail the spec if any of these core schemas or endpoints are absent or inconsistent: UserSchema, DailyLogSchema (with date, cigarettes, mood, triggers), MoodSchema, TriggerSchema, DashboardDataSchema, PatternAnalysisSchema, CopingStrategySchema, `/api/v1/daily_log`, `/api/v1/dashboard`, `/api/v1/patterns`, `/api/v1/copings`. Confirm the dashboard feedback/trend ties back to the user's reduction target and that the pattern/coping endpoints reference logged triggers."
+        "5. **Output JSON**: Your entire response must be in the specified JSON format.\n"
+        "6. **Contract Requirements**: Fail the spec if it does not define the necessary schemas and endpoints to satisfy every Acceptance Criterion. The spec must be self-contained and sufficient for a developer to build a working demo."
     )
     user_prompt = f"""
     Product idea: {product_idea}
@@ -964,16 +965,14 @@ def generate_engineering_code(
     system_prompt = (
         "You are a Senior Python Engineer. Your task is to implement a **demo-only prototype** from a spec into a single-file FastAPI app.\n"
         "## RULES:\n"
-        "1.  **Prototype Scope**: Use in-memory storage (e.g., a Python dictionary). DO NOT use databases. Simulate a single user (`current_user_id = 'demo'`) backed by a `users` dict that stores a `UserSchema` with `target_cigarettes`.\n"
-        "2.  **Spec Adherence**: Implement the Pydantic models and FastAPI endpoints *exactly* as defined in the spec. Do not add extra features beyond the required analytics and logging flows.\n"
+        "1.  **Prototype Scope**: Use in-memory storage (e.g., a Python dictionary `DB = {}`). DO NOT use databases (like SQLAlchemy) or file storage.\n"
+        "2.  **Spec Adherence**: Implement *only* the models and endpoints from the spec. Do not add extra features or endpoints.\n"
         "3.  **Correct Imports**: Ensure all necessary modules are imported (e.g., `Enum` from `enum`, `List` from `typing`, `date` from `datetime`).\n"
         "4.  **Async Correctness**: Any endpoint that uses `await request.json()` or another `await` call MUST be defined with `async def`.\n"
         "5.  **Unique IDs**: When storing items in a list, they must have a unique ID. Do NOT use the list index as an ID. If the spec is missing an ID field in a model, add one (e.g., `id: str = Field(default_factory=lambda: str(uuid.uuid4()))`).\n"
-        "6.  **Daily Log Contract**: `POST /api/v1/daily_log` must accept the DailyLogSchema (date, cigarettes, mood, triggers) and store each submission keyed by date while associating it with the hardcoded user.\n"
-        "7.  **Analytics Requirements**: `/api/v1/dashboard` must implement DashboardDataSchema, returning dates, cigarette_counts, feedback that references the user's reduction target, and a simple trend. `/api/v1/patterns` must return PatternAnalysisSchema derived from logged triggers, and `/api/v1/copings` must return `List[CopingStrategySchema]` with at least one strategy per trigger.\n"
-        "8.  **Spec-compliant Flow**: The app must implement only the endpoints defined in the spec (there should not be separate mood or trigger logging endpoints unless they appear in the spec contract you receive).\n"
-        "9.  **Single File**: The entire application must be in a single, runnable Python file named `main.py`.\n"
-        "10. **Output Format**: Return raw JSON with `file_name` and `code` only. Guard the uvicorn runner with `if __name__ == '__main__':`."
+        "6.  **Logical Completeness**: If the spec includes an endpoint to get an item by ID (e.g., `/items/{item_id}`), you MUST also implement a `GET /items` endpoint to list all items so the IDs can be discovered.\n"
+        "7.  **Single File**: The entire application must be in a single, runnable Python file named `main.py`.\n"
+        "8.  **Output Format**: Return raw JSON with `file_name` and `code` only. Guard the uvicorn runner with `if __name__ == '__main__':`."
     )
     user_prompt = f"""
     Product idea: {product_idea}
@@ -1031,8 +1030,8 @@ def run_engineering_qa_review(
         "2. **Prototype Scope**: The code *should* use in-memory storage (like a dictionary) and have no real authentication. DO NOT flag these as issues.\n"
         "3. **What to Check**: Focus on correct Pydantic models, endpoint paths and methods matching the spec, and basic error handling (like returning a 404 for a missing item).\n"
         "4. **Be Concise**: Keep findings brief and actionable. Keep the 'details' for each finding to one or two short sentences.\n"
-        "5. **Output JSON**: Your entire response must be in the specified JSON format."
-        "6. **Required Logic**: Verify the code instantiates the required UserSchema (with `target_cigarettes`), stores daily logs keyed by date, absorbs mood/trigger data, and implements `/api/v1/dashboard`, `/api/v1/patterns`, `/api/v1/copings` with feedback/trend, trigger analytics, and coping strategies that reference the user's logged triggers. Flag missing correlation between targets, patterns, or strategies as critical."
+        "5. **Output JSON**: Your entire response must be in the specified JSON format.\n"
+        "6. **Required Logic**: Verify that the code correctly implements the logic required to satisfy the user stories' acceptance criteria. For example, if an AC requires calculating a trend, the code must perform that calculation. Flag any missing or incorrect business logic as a 'critical' finding."
     )
     user_prompt = f"""
     Product idea: {product_idea}
@@ -1822,3 +1821,41 @@ def get_next_status(current_status: Optional[str]) -> Optional[str]:
     if idx + 1 < len(workflow_order):
         return workflow_order[idx + 1]
     return current_status
+
+
+def get_local_ip():
+    """
+    Finds the local IP address of the machine.
+    Connects to a public DNS server to find the primary network interface.
+    """
+    s = None
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        # Doesn't actually send data, just opens a socket to determine the route
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        return ip
+    except Exception:
+        logger.warning("Could not determine local IP address. Defaulting to localhost.")
+        return "127.0.0.1"
+    finally:
+        if s:
+            s.close()
+
+
+if __name__ == "__main__":
+    host = "127.0.0.1"
+    port = 8000
+
+    if settings.run_locally:
+        host = "0.0.0.0"
+        local_ip = get_local_ip()
+        local_url = f"http://{local_ip}:{port}"
+        logger.info(f"🚀 App is configured to run on the local network.")
+        logger.info(f"🚀 Access the UI from other devices at: {local_url}")
+        with open("local_url.txt", "w") as f:
+            f.write(local_url)
+    else:
+        logger.info("🚀 App is configured to run locally only. Access at http://127.0.0.1:8000")
+
+    uvicorn.run(app, host=host, port=port)
