@@ -686,8 +686,9 @@ def generate_wireframe_html(product_idea: str, user_stories: str | None, flow_di
     }    
     system_prompt = (
         "You are a Senior UI/UX Prototyper. Your goal is to create a low-fidelity wireframe writing HTML and Tailwind CSS code. "
+        "It should deliver the core experience of the product within the low-fi wireframe."
+        "You should use the provided product idea, its user stories, acceptance criterias, and a main user flow as input. "
         "Think in terms of reusable components like headers, cards, and sections."
-        "Use the user stories, its acceptance criteria, and user flow as inputs. "
     )
     user_prompt = f"""
         Idea: {product_idea}.
@@ -929,7 +930,6 @@ def run_spec_qa_review(
     """
     # Use the REASONING model for this logical review task.
     parsed = call_ollama_json(system_prompt, user_prompt, qa_schema, reasoning=True)
-    parsed = call_ollama_json(system_prompt, user_prompt, qa_schema, reasoning=True)
     if not parsed:
         return json.dumps({"verdict": "fail", "findings": [{"severity": "critical", "title": "QA Failure", "details": "Could not generate a structured QA response for the spec."}] }, indent=2)
     lines = [f"Verdict: {parsed.get('verdict', 'unknown')}"]
@@ -965,14 +965,16 @@ def generate_engineering_code(
     system_prompt = (
         "You are a Senior Python Engineer. Your task is to implement a **demo-only prototype** from a spec into a single-file FastAPI app.\n"
         "## RULES:\n"
-        "1.  **Prototype Scope**: Use in-memory storage (e.g., a Python dictionary `DB = {}`). DO NOT use databases (like SQLAlchemy) or file storage.\n"
-        "2.  **Spec Adherence**: Implement *only* the models and endpoints from the spec. Do not add extra features or endpoints.\n"
-        "3.  **Correct Imports**: Ensure all necessary modules are imported (e.g., `Enum` from `enum`, `List` from `typing`, `date` from `datetime`).\n"
-        "4.  **Async Correctness**: Any endpoint that uses `await request.json()` or another `await` call MUST be defined with `async def`.\n"
-        "5.  **Unique IDs**: When storing items in a list, they must have a unique ID. Do NOT use the list index as an ID. If the spec is missing an ID field in a model, add one (e.g., `id: str = Field(default_factory=lambda: str(uuid.uuid4()))`).\n"
-        "6.  **Logical Completeness**: If the spec includes an endpoint to get an item by ID (e.g., `/items/{item_id}`), you MUST also implement a `GET /items` endpoint to list all items so the IDs can be discovered.\n"
-        "7.  **Single File**: The entire application must be in a single, runnable Python file named `main.py`.\n"
-        "8.  **Output Format**: Return raw JSON with `file_name` and `code` only. Guard the uvicorn runner with `if __name__ == '__main__':`."
+        "1. **Prototype Scope**: Use in-memory storage (e.g., a Python dictionary `DB = {}`). DO NOT use databases (like SQLAlchemy) or file storage.\n"
+        "2. **Spec Adherence**: Implement *only* the models and endpoints from the spec. Do not add extra features or endpoints.\n"
+        "3. **Correct Imports**: Ensure all necessary modules are imported (e.g., `Enum` from `enum`, `List` from `typing`, `date` from `datetime`).\n"
+        "4. **Async Correctness**: Any endpoint that uses `await request.json()` or another `await` call MUST be defined with `async def`.\n"
+        "5. **Unique IDs**: When storing items in a list, they must have a unique ID. Do NOT use the list index as an ID. If the spec is missing an ID field in a model, add one (e.g., `id: str = Field(default_factory=lambda: str(uuid.uuid4()))`).\n"
+        "6. **Robust In-Memory DB Structure**: Your in-memory database (e.g., `DB = {}`) must handle multiple, distinct data collections associated with a single primary identifier (like a user ID). A reliable pattern is to use a nested dictionary, where the top-level key is the identifier, and its value is another dictionary that holds the different data collections. For example: `DB['user_123'] = {'profile_data': {...}, 'items_list': [...]}`. Do not store a single object directly as the value for an identifier if other data types will be associated with it, as this will cause data conflicts.\n"
+        "7. **Implement Core Business Logic**: You MUST implement the business logic required by the user stories and acceptance criteria. If an endpoint is supposed to generate insights, forecasts, or calculations, you must write code that performs a plausible, simple version of that logic (e.g., calculating an average, filtering a list, or applying a basic formula). Do NOT leave function bodies empty or with only a `return []` statement.\n"
+        "8. **Logical Completeness**: If the spec includes an endpoint to get an item by ID (e.g., `/items/{item_id}`), you MUST also implement a `GET /items` endpoint to list all items so the IDs can be discovered.\n"
+        "9. **Single File**: The entire application must be in a single, runnable Python file named `main.py`.\n"
+        "10. **Output Format**: Return raw JSON with `file_name` and `code` only. Guard the uvicorn runner with `if __name__ == '__main__':`."
     )
     user_prompt = f"""
     Product idea: {product_idea}
@@ -1031,7 +1033,8 @@ def run_engineering_qa_review(
         "3. **What to Check**: Focus on correct Pydantic models, endpoint paths and methods matching the spec, and basic error handling (like returning a 404 for a missing item).\n"
         "4. **Be Concise**: Keep findings brief and actionable. Keep the 'details' for each finding to one or two short sentences.\n"
         "5. **Output JSON**: Your entire response must be in the specified JSON format.\n"
-        "6. **Required Logic**: Verify that the code correctly implements the logic required to satisfy the user stories' acceptance criteria. For example, if an AC requires calculating a trend, the code must perform that calculation. Flag any missing or incorrect business logic as a 'critical' finding."
+        "6. **Verify Business Logic Implementation**: Your review MUST verify that the code correctly implements the logic required to satisfy the user stories' acceptance criteria. \n"
+        "    Check that functions and endpoints intended to perform calculations, generate insights, or create forecasts contain actual implementation logic. Flag any missing or incorrect business logic as a 'critical' finding."
     )
     user_prompt = f"""
     Product idea: {product_idea}

@@ -118,6 +118,26 @@
             flex-direction: column;
             gap: 0.6rem;
         }
+        .flow-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: pointer;
+        }
+        .flow-header h3 {
+            margin: 0;
+        }
+        .workflow-toggle-btn {
+            display: none; /* Hidden by default on desktop */
+            background: transparent;
+            border: none;
+            color: #94a3b8;
+            font-size: 1.5rem;
+            padding: 0;
+            cursor: pointer;
+            box-shadow: none;
+            transition: transform 0.2s ease;
+        }
         .flow-line {
             display: flex;
             flex-wrap: wrap;
@@ -426,6 +446,15 @@
             .approval-card, .artifact-card, .status-card {
                 padding: 1.25rem;
             }
+            .workflow-toggle-btn {
+                display: block; /* Visible on mobile */
+            }
+            .flow-line.collapsed {
+                display: none;
+            }
+            .artifact-grid {
+                flex-direction: column;
+            }
         }
     </style>
 </head>
@@ -455,8 +484,11 @@
             <div class="status-pill" id="current-status-pill">Idle</div>
             <p class="status-caption">Current Agent: <strong id="current-agent-label">Coordinator</strong></p>
             <div class="flow-section">
-                <h3>Current Workflow Stage</h3>
-                <div id="workflow-flow" class="flow-line"></div>
+                <div class="flow-header" id="workflow-header">
+                    <h3>Current Workflow Stage</h3>
+                    <button id="toggle-workflow-btn" class="workflow-toggle-btn" aria-label="Toggle workflow visibility">▼</button>
+                </div>
+                <div id="workflow-flow" class="flow-line collapsed"></div>
             </div>
         </section>
 
@@ -594,6 +626,8 @@
         const overlaySave = document.getElementById('overlay-save');
         const overlayCancel = document.getElementById('overlay-cancel');
         const overlayClose = document.getElementById('overlay-close');
+        const workflowHeader = document.getElementById('workflow-header');
+        const toggleWorkflowBtn = document.getElementById('toggle-workflow-btn');
 
         let currentTaskId = null;
         let pollingIntervalId = null;
@@ -1125,6 +1159,17 @@ ${storedWireframeHtml}
             }
         }
 
+        function setupCollapsibleWorkflow() {
+            workflowHeader.addEventListener('click', () => {
+                const isCollapsed = workflowFlow.classList.toggle('collapsed');
+                toggleWorkflowBtn.style.transform = isCollapsed ? 'rotate(0deg)' : 'rotate(180deg)';
+            });
+            // Start collapsed on small screens
+            if (window.innerWidth <= 768) {
+                workflowFlow.classList.add('collapsed');
+            }
+        }
+
         approveBtn.addEventListener('click', () => respondToApproval(true));
         rejectBtn.addEventListener('click', () => respondToApproval(false));
         refreshQueueBtn.addEventListener('click', pollForApprovals);
@@ -1137,6 +1182,7 @@ ${storedWireframeHtml}
         overlayCancel.addEventListener('click', closeOverlay);
         overlaySave.addEventListener('click', saveOverlay);
 
+        setupCollapsibleWorkflow();
         checkPendingApprovalOnLoad();
         renderWorkflow(currentStatus);
         updateCurrentStage(currentStatus);
