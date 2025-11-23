@@ -253,7 +253,7 @@ def call_ollama_json(
     for attempt in range(max_retries):
         try:
             start_time = time.time()
-            with httpx.Client(timeout=300) as client:
+            with httpx.Client(timeout=600) as client: # Increased timeout to 10 minutes
                 response = client.post(f"{OLLAMA_BASE_URL}api/generate", json=payload)
                 response.raise_for_status()
                 data = response.json()
