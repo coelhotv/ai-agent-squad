@@ -772,7 +772,8 @@ def generate_engineering_spec(
         "2. **NO PRODUCTION FEATURES**: You are FORBIDDEN from including: real authentication (JWT/OAuth), persistent databases (use in-memory only), background tasks (Celery/cron), or unit tests. Mentioning these will fail the task.\n"
         "3. **SIMULATE, DON'T BUILD**: For user-specific data, assume a single, hardcoded user. For reminders, the endpoint can simply return a static list; no scheduling logic is needed.\n"
         "4. **ADDRESS EVERY AC**: Your plan must state how each acceptance criterion will be met with a specific schema or endpoint.\n"
-        "5. **DATA FIRST**: Define the Pydantic schemas and their critical fields first. Your primary goal is to model the data structures needed to satisfy the user stories."
+        "5. **DATA FIRST**: Define the Pydantic schemas and their critical fields first. Your primary goal is to model the data structures needed to satisfy the user stories.\n"
+        "6. **TRACEABILITY**: For each schema and endpoint you define in the final contract, you must reference the specific Acceptance Criterion (e.g., 'AC 1.2') it helps satisfy."
     )
     reasoning_user_prompt = f"""
     Product idea: {product_idea}
@@ -954,6 +955,44 @@ def generate_engineering_code(
     wireframe_html: str | None,
     spec_contract: str | None,
 ) -> tuple[str, str]:
+    implementation_plan = "# No implementation plan was generated."
+    # --- Step 1: Generate implementation plan with the reasoning model ---
+    plan_schema = {
+        "type": "object",
+        "properties": {
+            "implementation_plan": {
+                "type": "string",
+                "description": "Detailed pseudo-code or step-by-step implementation logic for each endpoint. Focus on data flow and in-memory DB interactions."
+            }
+        },
+        "required": ["implementation_plan"]
+    }
+    plan_system_prompt = (
+        "You are a Senior Engineer creating an implementation plan. Your task is to write detailed pseudo-code for each endpoint in the provided API spec.\n"
+        "RULES:\n"
+        "1. For each endpoint, detail the logic: how to handle the request, what data to fetch from the in-memory `DB`, how to process it, and what to return.\n"
+        "2. Plan for an in-memory database (a Python dictionary `DB = {}`). Specify how you will structure and access data (e.g., `DB['users']`, `DB['coupons']`).\n"
+        "3. Your plan must be a clear, step-by-step guide that another developer can use to write the final Python code."
+    )
+    plan_user_prompt = f"""
+    Product Idea (for context): {product_idea}
+    User Stories (for business logic context): {user_stories or 'N/A'}
+    API Specification (source of truth):
+    {spec_contract or 'Unavailable.'}
+
+    Based on the spec and user stories, provide a detailed implementation plan in pseudo-code.
+    """
+    logger.info("... Generating engineering implementation plan with reasoning model.")
+    plan_parsed = call_ollama_json(plan_system_prompt, plan_user_prompt, plan_schema, reasoning=True)
+
+    if not plan_parsed or not plan_parsed.get("implementation_plan"):
+        logger.error("... Failed to generate implementation plan.")
+        return "main.py", "# Code generation failed: Could not create an implementation plan."
+
+    implementation_plan = plan_parsed.get("implementation_plan", implementation_plan)
+    logger.info("... Implementation plan generated successfully.")
+
+    # --- Step 2: Generate the final code with the coding model ---
     code_schema = {
         "type": "object",
         "properties": {
@@ -962,38 +1001,41 @@ def generate_engineering_code(
         },
         "required": ["file_name", "code"]
     }
-    system_prompt = (
-        "You are a Senior Python Engineer. Your task is to implement a **demo-only prototype** from a spec into a single-file FastAPI app.\n"
+    code_system_prompt = (
+        "You are a Python developer. Your task is to translate the provided implementation plan and API spec into a single, runnable FastAPI file.\n"
         "## RULES:\n"
-        "1. **Prototype Scope**: Use in-memory storage (e.g., a Python dictionary `DB = {}`). DO NOT use databases (like SQLAlchemy) or file storage.\n"
-        "2. **Spec Adherence**: Implement *only* the models and endpoints from the spec. Do not add extra features or endpoints.\n"
-        "3. **Correct Imports**: Ensure all necessary modules are imported (e.g., `Enum` from `enum`, `List` from `typing`, `date` from `datetime`).\n"
-        "4. **Async Correctness**: Any endpoint that uses `await request.json()` or another `await` call MUST be defined with `async def`.\n"
-        "5. **Unique IDs**: When storing items in a list, they must have a unique ID. Do NOT use the list index as an ID. If the spec is missing an ID field in a model, add one (e.g., `id: str = Field(default_factory=lambda: str(uuid.uuid4()))`).\n"
-        "6. **Robust In-Memory DB Structure**: Your in-memory database (e.g., `DB = {}`) must handle multiple, distinct data collections associated with a single primary identifier (like a user ID). A reliable pattern is to use a nested dictionary, where the top-level key is the identifier, and its value is another dictionary that holds the different data collections. For example: `DB['user_123'] = {'profile_data': {...}, 'items_list': [...]}`. Do not store a single object directly as the value for an identifier if other data types will be associated with it, as this will cause data conflicts.\n"
-        "7. **Implement Core Business Logic**: You MUST implement the business logic required by the user stories and acceptance criteria. If an endpoint is supposed to generate insights, forecasts, or calculations, you must write code that performs a plausible, simple version of that logic (e.g., calculating an average, filtering a list, or applying a basic formula). Do NOT leave function bodies empty or with only a `return []` statement.\n"
-        "8. **Logical Completeness**: If the spec includes an endpoint to get an item by ID (e.g., `/items/{item_id}`), you MUST also implement a `GET /items` endpoint to list all items so the IDs can be discovered.\n"
-        "9. **Single File**: The entire application must be in a single, runnable Python file named `main.py`.\n"
-        "10. **Output Format**: Return raw JSON with `file_name` and `code` only. Guard the uvicorn runner with `if __name__ == '__main__':`."
+        "1. **Strict Adherence**: Follow the implementation plan and API spec *exactly*. Do not add any logic, endpoints, or models not present in the plan or spec.\n"
+        "2. **Single File**: The entire application must be in one Python file.\n"
+        "3. **In-Memory DB**: Use a simple dictionary `DB = {}` for storage as outlined in the plan.\n"
+        "4. **Complete Code**: The code must be complete, runnable, and include all necessary imports (FastAPI, Pydantic, etc.) and a `uvicorn` runner block.\n"
+        "5. **Output Format**: Return only the raw JSON with `file_name` and `code`."
     )
-    user_prompt = f"""
-    Product idea: {product_idea}
-    
-    User stories (for context only, spec is authoritative):
-    {user_stories or 'Unavailable.'}
-
-    Wireframe (for context only, spec is authoritative):
-    {wireframe_html or 'Unavailable.'}
-
-    Architecture Spec (implement exactly these models and endpoints):
+    code_user_prompt = f"""
+    API Specification:
     {spec_contract or 'Unavailable.'}
 
-    Now write the Python code!
+    Implementation Plan:
+    {implementation_plan}
+
+    Now, write the complete Python code for `main.py` based on the provided spec and plan.
     """
-    parsed = call_ollama_json(system_prompt, user_prompt, code_schema)
-    if parsed and parsed.get("file_name") and parsed.get("code"):
-        return parsed["file_name"], parsed["code"]
-    return "main.py", "Code unavailable."
+    logger.info("... Generating Python code from implementation plan with coding model.")
+    code_parsed = call_ollama_json(code_system_prompt, code_user_prompt, code_schema)
+
+    if code_parsed and code_parsed.get("file_name") and code_parsed.get("code"):
+        file_name = code_parsed["file_name"]
+        code = code_parsed["code"]
+        # Combine the plan and code into a single artifact
+        combined_artifact = f'''
+"""
+Implementation Plan:
+{implementation_plan}
+"""
+{code}
+'''
+        return file_name, combined_artifact.strip()
+
+    return "main.py", "# Code generation failed."
 
 
 def run_engineering_qa_review(
@@ -1028,13 +1070,12 @@ def run_engineering_qa_review(
     system_prompt = (
         "You are a QA Engineer reviewing a **demo-only prototype** FastAPI app. Your goal is to ensure the code correctly implements the provided spec for a simple demo.\n"
         "RULES:\n"
-        "1. **Primary Goal**: Does the code implement all schemas and endpoints from the spec? This is the main reason to 'fail' the code.\n"
+        "1. **Primary Goal**: Your review must answer one question: Does the provided code **exactly** implement the schemas and endpoints from the `Architecture Spec`? A 'fail' verdict is required if there is any deviation.\n"
         "2. **Prototype Scope**: The code *should* use in-memory storage (like a dictionary) and have no real authentication. DO NOT flag these as issues.\n"
-        "3. **What to Check**: Focus on correct Pydantic models, endpoint paths and methods matching the spec, and basic error handling (like returning a 404 for a missing item).\n"
+        "3. **Out of Scope**: You are FORBIDDEN from mentioning features or requirements from the 'Next Iteration Backlog' section of the user stories. Your review is for the MVP only.\n"
         "4. **Be Concise**: Keep findings brief and actionable. Keep the 'details' for each finding to one or two short sentences.\n"
         "5. **Output JSON**: Your entire response must be in the specified JSON format.\n"
-        "6. **Verify Business Logic Implementation**: Your review MUST verify that the code correctly implements the logic required to satisfy the user stories' acceptance criteria. \n"
-        "    Check that functions and endpoints intended to perform calculations, generate insights, or create forecasts contain actual implementation logic. Flag any missing or incorrect business logic as a 'critical' finding."
+        "6. **Verify Business Logic**: Check that functions and endpoints contain a plausible, simple implementation of the business logic required by the user stories' acceptance criteria. Flag empty or placeholder logic as a 'critical' finding."
     )
     user_prompt = f"""
     Product idea: {product_idea}
