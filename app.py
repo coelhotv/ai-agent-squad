@@ -416,44 +416,55 @@ def format_structured_summary(data: dict) -> str:
 
 
 def generate_prd_document(product_idea: str, research_summary: str | None) -> str:
+    section_schema = {
+        "type": "object",
+        "properties": {
+            "rationale": {"type": "string"},
+            "items": {
+                "type": "array",
+                "items": {"type": "string"},
+            },
+        },
+        "required": ["rationale", "items"],
+    }
+
     prd_schema = {
         "type": "object",
         "properties": {
             "app_name": {"type": "string"},
             "executive_summary": {"type": "string"},
-            "market_opportunity": {
-                "type": "array",
-                "items": {"type": "string"}
-            },
-            "customer_needs": {
-                "type": "array",
-                "items": {"type": "string"}
-            },
-            "product_scope": {
-                "type": "array",
-                "items": {"type": "string"}
-            },
-            "success_criteria": {
-                "type": "array",
-                "items": {"type": "string"}
-            }
+            "target_segment": {"type": "string"},
+            "market_opportunity": section_schema,
+            "customer_needs": section_schema,
+            "product_scope": section_schema,
+            "launch_milestones": section_schema,
+            "critical_metrics": section_schema,
+            "dependencies": section_schema,
+            "risks": section_schema,
+            "success_criteria": section_schema,
         },
         "required": [
             "app_name",
             "executive_summary",
+            "target_segment",
             "market_opportunity",
             "customer_needs",
             "product_scope",
+            "critical_metrics",
             "success_criteria",
         ]
-    }    
+    }
     system_prompt = (
-        "You are a senior PM translating user needs and business opportunities into a clear, "
-        "concise, and actionable one-page PRD for engineering and design teams. Keep it punchy."
+        "You are a senior PM translating user needs and business opportunities into a "
+        "clear, actionable one-page PRD. For every section, explain why it matters, what "
+        "outcome we are targeting, and one concrete next step (e.g., a dependency, test, "
+        "or measurement). Favor specific examples and metric targets over abstract statements."
     )
     user_prompt = (
-        f"Idea: {product_idea}.\nResearch summary: {research_summary or 'n/a'}."
-        " Draft the requested sections with the most important bullets first."
+        f"Idea: {product_idea}.\nResearch summary: {research_summary or 'n/a'}.\n"
+        "Structure the response using the schema: put the most critical insights first, "
+        "include a tangible follow-up for each section, and surface metrics, risks, "
+        "dependencies, and milestones wherever they help engineering/design take action."
     )
     parsed = call_ollama_json(
         system_prompt, user_prompt, prd_schema, reasoning=True
@@ -466,17 +477,24 @@ def generate_prd_document(product_idea: str, research_summary: str | None) -> st
                 "properties": {
                     "app_name": {"type": "string"},
                     "executive_summary": {"type": "string"},
-                    "market_opportunity": {"type": "array", "items": {"type": "string"}},
-                    "customer_needs": {"type": "array", "items": {"type": "string"}},
-                    "product_scope": {"type": "array", "items": {"type": "string"}},
-                    "success_criteria": {"type": "array", "items": {"type": "string"}},
+                    "target_segment": {"type": "string"},
+                    "market_opportunity": section_schema,
+                    "customer_needs": section_schema,
+                    "product_scope": section_schema,
+                    "launch_milestones": section_schema,
+                    "critical_metrics": section_schema,
+                    "dependencies": section_schema,
+                    "risks": section_schema,
+                    "success_criteria": section_schema,
                 },
                 "required": [
                     "app_name",
                     "executive_summary",
+                    "target_segment",
                     "market_opportunity",
                     "customer_needs",
                     "product_scope",
+                    "critical_metrics",
                     "success_criteria",
                 ],
             },
@@ -488,31 +506,82 @@ def generate_prd_document(product_idea: str, research_summary: str | None) -> st
     lines = ["# App:", parsed.get("app_name", "")]
     lines.append("\n## Executive Summary:")
     lines.append(parsed.get("executive_summary", ""))
-    lines.append("\n## Market Opportunity & Positioning:")
-    for item in parsed.get("market_opportunity", [])[:3]:
-        lines.append(f"- {item}")
-    lines.append("\n## Customer Needs:")
-    for item in parsed.get("customer_needs", [])[:4]:
-        lines.append(f"- {item}")
-    lines.append("\n## Product Scope and Use cases:")
-    for item in parsed.get("product_scope", [])[:4]:
-        lines.append(f"- {item}")
-    lines.append("\n## Success Criteria:")
-    for item in parsed.get("success_criteria", [])[:3]:
-        lines.append(f"- {item}")
+    target_segment = parsed.get("target_segment")
+    if target_segment:
+        lines.append("\n## Target Segment & Context:")
+        lines.append(target_segment)
+
+    def append_rich_section(title: str, key: str, max_items: int = 3, required: bool = False) -> None:
+        section = parsed.get(key)
+        if not section:
+            if required:
+                lines.append(f"\n## {title}")
+                lines.append("Details pending.")
+            return
+        lines.append(f"\n## {title}:")
+        rationale = section.get("rationale")
+        if rationale:
+            lines.append(rationale)
+        for item in section.get("items", [])[:max_items]:
+            lines.append(f"- {item}")
+
+    append_rich_section("Market Opportunity & Positioning", "market_opportunity", max_items=3, required=True)
+    append_rich_section("Customer Needs", "customer_needs", max_items=4, required=True)
+    append_rich_section("Product Scope and Use cases", "product_scope", max_items=4, required=True)
+    append_rich_section("Launch Milestones", "launch_milestones", max_items=3)
+    append_rich_section("Critical Metrics", "critical_metrics", max_items=3, required=True)
+    append_rich_section("Dependencies & Questions", "dependencies", max_items=3)
+    append_rich_section("Risks / Unknowns", "risks", max_items=3)
+    append_rich_section("Success Criteria", "success_criteria", max_items=3, required=True)
     return "\n".join(lines).strip()
 
 
 def fallback_prd(product_idea: str, research_summary: str | None) -> str:
     return (
-        f"Executive Summary:\nA first iteration of '{product_idea}' focused on a single"
-        " core workflow.\n\nMarket Opportunity & Positioning:\n"
-        f"- Based on research: {research_summary or 'insights pending.'}\n"
-        "- Target early adopters and gather feedback.\n\nCustomer Needs:\n"
-        "- Simple onboarding\n- Clear value communication\n- Feedback loop\n\n"
-        "Product Scope:\n- Pilot use case that validates demand\n"
-        "- Internal admin dashboard for basic tracking\n\nSuccess Criteria:\n"
-        "- 10 pilot sign-ups\n- 60% repeat usage in 2 weeks\n- Qualitative feedback on usability"
+        f"# App:\n{product_idea}\n\n"
+        "## Target Segment & Context:\n"
+        "Rationale: Define a primary persona and segment with additional research.\n"
+        f"- {research_summary or 'Women 18-45 focused on reproductive health self-care.'}\n\n"
+        "## Executive Summary:\n"
+        "A first iteration of CycleGuard focuses on a single, high-value workflow that validates "
+        "demand while keeping delivery scope tight.\n\n"
+        "## Market Opportunity & Positioning:\n"
+        "Rationale: Early research shows people managing hormonal health have few proactive, trusted companions.\n"
+        "- People need predictive cycle insights that respect their privacy.\n"
+        "- Position as a trusted, AI-informed companion with healthcare-grade safeguards.\n\n"
+        "## Customer Needs:\n"
+        "Rationale: Users need clarity into their bodies and a simple, compassionate log of symptoms.\n"
+        "- Accurate tracking with minimal manual work.\n"
+        "- Symptom logging that reveals meaningful patterns.\n"
+        "- Easy visibility into fertility and contraception windows.\n\n"
+        "## Product Scope and Use cases:\n"
+        "Rationale: Start with the highest-leverage capabilities that prove value quickly.\n"
+        "- Cycle tracking with AI-powered predictions.\n"
+        "- Health insights that highlight emerging patterns.\n"
+        "- Symptom logging dashboard for correlation analysis.\n\n"
+        "## Launch Milestones:\n"
+        "Rationale: Validate assumptions and ensure readiness before a wider release.\n"
+        "- Validate primary persona and critical use cases with interviews.\n"
+        "- Ship MVP cycle tracker with opt-in symptom logging.\n"
+        "- Run closed beta with 20 testers for two full cycles.\n\n"
+        "## Critical Metrics:\n"
+        "Rationale: Measure adoption, accuracy, and trust to inform iteration.\n"
+        "- <draft> 70% of testers complete at least two consecutive cycles.\n"
+        "- Prediction accuracy within ±2 days for cycle start.\n"
+        "- Privacy NPS > 80% among pilot users.\n\n"
+        "## Dependencies & Questions:\n"
+        "Rationale: Identify technology and legal considerations before scaling.\n"
+        "- Identify trustworthy data sources for cycle prediction modeling.\n"
+        "- Legal review of data handling before launch.\n\n"
+        "## Risks / Unknowns:\n"
+        "Rationale: Surface unknowns so the core team can address them early.\n"
+        "- Model drift if users have irregular or postoperative cycles.\n"
+        "- Challenge in keeping retention high once novelty wears off.\n\n"
+        "## Success Criteria:\n"
+        "Rationale: Define what success looks like for the pilot.\n"
+        "- 10 pilot sign-ups.\n"
+        "- 60% repeat usage in 2 weeks.\n"
+        "- Qualitative feedback on usability and privacy."
     )
 
 
@@ -752,6 +821,7 @@ def fallback_wireframe_html(product_idea: str) -> str:
 def generate_engineering_spec(
     product_idea: str,
     user_stories: str | None,
+    wireframe_html: str | None,
     qa_feedback: str | None = None,
 ) -> str:
     # --- Step 1: Generate the reasoning steps with the reasoning model ---
@@ -770,7 +840,7 @@ def generate_engineering_spec(
         "You are a Senior Software Architect specializing in FastAPI, Pydantic v2, and uvicorn.\n"
         "Your task is to create a step-by-step reasoning plan for a **demo-only prototype API**. This is for a short-lived demo, not a production system.\n"
         "RULES:\n"
-        "1. **MVP ONLY**: Your plan must ONLY address the user stories provided. IGNORE all backlog items, future features, or items not in the user stories.\n"
+        "1. **MVP ONLY**: Your plan must ONLY address the user stories provided. IGNORE all backlog items, future features, or items not in the user stories. Low-fidely wireframe is provided only for reference.\n"
         "2. **NO PRODUCTION FEATURES**: You are FORBIDDEN from including: real authentication (JWT/OAuth), persistent databases (use in-memory only), background tasks (Celery/cron), or unit tests. Mentioning these will fail the task.\n"
         "3. **SIMULATE, DON'T BUILD**: For user-specific data, assume a single, hardcoded user. For reminders, the endpoint can simply return a static list; no scheduling logic is needed.\n"
         "4. **ADDRESS EVERY AC**: Your plan must state how each acceptance criterion will be met with a specific schema or endpoint.\n"
@@ -782,6 +852,10 @@ def generate_engineering_spec(
 
     User stories and AC:
     {user_stories or 'Unavailable.'}
+
+    Wireframe HTML:
+    {wireframe_html or 'Unavailable.'}
+
 
     {'Previous attempt QA feedback: ' + qa_feedback if qa_feedback else ''}
 
@@ -954,7 +1028,6 @@ def run_spec_qa_review(
 def generate_engineering_code(
     product_idea: str,
     user_stories: str | None,
-    wireframe_html: str | None,
     spec_contract: str | None,
 ) -> tuple[str, str]:
     implementation_plan = "# No implementation plan was generated."
@@ -1026,15 +1099,15 @@ def generate_engineering_code(
 
     if code_parsed and code_parsed.get("file_name") and code_parsed.get("code"):
         file_name = code_parsed["file_name"]
-        code = code_parsed["code"]
         # Combine the plan and code into a single structured JSON artifact
         combined_artifact = {
             "plan": implementation_plan,
-            "code": code
+            "code": code_parsed["code"]
         }
         # Return the file name and the JSON string
         return file_name, json.dumps(combined_artifact, indent=2)
 
+    logger.error("... Failed to generate Python code from implementation plan.")
     return "main.py", "# Code generation failed."
 
 
@@ -1088,10 +1161,10 @@ def run_engineering_qa_review(
     parsed = call_ollama_json(system_prompt, user_prompt, qa_schema, reasoning=True)
     if not parsed:
         return json.dumps({"verdict": "fail", "findings": [{"severity": "critical", "title": "QA Failure", "details": "Could not generate a structured QA response for the spec."}] }, indent=2)
-    lines = [f"Verdict: {parsed.get('verdict', 'unknown')}"]
+    lines = [f"## Verdict: {parsed.get('verdict', 'unknown')}"]
     findings = parsed.get("findings") or []
     if findings:
-        lines.append("Findings:")
+        lines.append("## Findings:")
         for finding in findings:
             sev = finding.get("severity") or "info"
             title = finding.get("title") or "Issue"
@@ -1099,7 +1172,7 @@ def run_engineering_qa_review(
             lines.append(f"- [{sev}] {title}: {details}")
     recs = parsed.get("recommendations") or []
     if recs:
-        lines.append("Recommendations:")
+        lines.append("## Recommendations:")
         for rec in recs:
             lines.append(f"- {rec}")
     return "\n".join(lines).strip()
@@ -1223,6 +1296,7 @@ def engineering_spec_node(state: AgentState):
     spec = generate_engineering_spec(
         state['product_idea'],
         state.get('user_stories'),
+        state.get('wireframe_html'),
         # No longer passing QA feedback
     )
     state['engineering_spec'] = spec
@@ -1270,7 +1344,6 @@ def engineering_node(state: AgentState):
     file_name, code = generate_engineering_code(
         state['product_idea'],
         state.get('user_stories'),
-        state.get('wireframe_html'),
         spec_contract, # Pass only the contract
     )
     state['engineering_file_name'] = file_name or "main.py"
@@ -1882,19 +1955,6 @@ if __name__ == "__main__":
 
     if settings.run_locally:
         host = "0.0.0.0"
-        # When running in Docker, the host is 0.0.0.0, but the accessible IP is the host's IP.
-        # The container can't know the host's IP, so we provide instructions.
-        local_url_message = (
-            f"🚀 App is accessible on your local network. Find your computer's local IP address "
-            f"(e.g., by running 'ifconfig' or 'ip addr') and access the app at http://<YOUR_LOCAL_IP>:{port}"
-        )
-        logger.info(local_url_message)
-        with open("local_url.txt", "w") as f:
-            f.write(f"Access the app on your local network at http://<YOUR_LOCAL_IP>:{port}\n")
-    else:
-        logger.info("🚀 App is configured to run locally only. Access at http://127.0.0.1:8000")
-
-    if settings.run_locally:
         # When reload is True, uvicorn needs an import string to be able to re-import the app.
         uvicorn.run("app:app", host=host, port=port, reload=True)
     else:
