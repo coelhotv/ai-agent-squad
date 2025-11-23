@@ -1,3 +1,5 @@
+#version 0.5
+
 import os
 import json
 import csv
@@ -380,15 +382,15 @@ def format_structured_summary(data: dict) -> str:
     lines = []
     summary = data.get("summary")
     if summary:
-        lines.append("Summary:\n" + summary.strip())
+        lines.append("## Summary:\n" + summary.strip())
 
     target_audience = data.get("target_audience")
     if target_audience:
-        lines.append("\nTarget Audience:\n" + target_audience.strip())
+        lines.append("\n## Target Audience:\n" + target_audience.strip())
 
     opportunities = data.get("opportunities") or []
     if opportunities:
-        lines.append("\nOpportunities:")
+        lines.append("\n## Opportunities:")
         for opp in opportunities:
             title = opp.get("title") or "Opportunity"
             details = opp.get("details") or ""
@@ -396,7 +398,7 @@ def format_structured_summary(data: dict) -> str:
 
     risks = data.get("risks") or []
     if risks:
-        lines.append("\nRisks:")
+        lines.append("\n## Risks:")
         for risk in risks:
             title = risk.get("title") or "Risk"
             details = risk.get("details") or ""
@@ -404,7 +406,7 @@ def format_structured_summary(data: dict) -> str:
 
     refs = data.get("references") or []
     if refs:
-        lines.append("\nReferences:")
+        lines.append("\n## References:")
         for ref in refs:
             source = ref.get("source") or "Source"
             url = ref.get("url") or ""
@@ -483,19 +485,19 @@ def generate_prd_document(product_idea: str, research_summary: str | None) -> st
     if not parsed:
         return fallback_prd(product_idea, research_summary)
 
-    lines = ["App:", parsed.get("app_name", "")]
-    lines.append("\nExecutive Summary:")
+    lines = ["# App:", parsed.get("app_name", "")]
+    lines.append("\n## Executive Summary:")
     lines.append(parsed.get("executive_summary", ""))
-    lines.append("\nMarket Opportunity & Positioning:")
+    lines.append("\n## Market Opportunity & Positioning:")
     for item in parsed.get("market_opportunity", [])[:3]:
         lines.append(f"- {item}")
-    lines.append("\nCustomer Needs:")
+    lines.append("\n## Customer Needs:")
     for item in parsed.get("customer_needs", [])[:4]:
         lines.append(f"- {item}")
-    lines.append("\nProduct Scope and Use cases:")
+    lines.append("\n## Product Scope and Use cases:")
     for item in parsed.get("product_scope", [])[:4]:
         lines.append(f"- {item}")
-    lines.append("\nSuccess Criteria:")
+    lines.append("\n## Success Criteria:")
     for item in parsed.get("success_criteria", [])[:3]:
         lines.append(f"- {item}")
     return "\n".join(lines).strip()
@@ -544,7 +546,7 @@ def generate_user_stories(product_idea: str, prd_summary: str | None) -> str:
     user_prompt = (
         f"Idea: {product_idea}.\nPRD context: {prd_summary or 'Unavailable.'}\n"
         " Produce two high-value user stories to be in the MVP."
-        " Number each story sequentially. For each story, provide 2-3 acceptance criteria."
+        " For each story, provide 2-3 acceptance criteria."
         " End with a short backlog list."
     )
     parsed = call_ollama_json(
@@ -579,16 +581,16 @@ def generate_user_stories(product_idea: str, prd_summary: str | None) -> str:
     if not parsed:
         return fallback_user_stories(product_idea)
 
-    lines = ["User Stories:"]
-    for entry in parsed.get("stories", [])[:4]:
+    lines = [" ## User Stories:"]
+    for i, entry in enumerate(parsed.get("stories", [])[:4], 1):
         story_text = entry.get("story") or ""
-        lines.append(f"\n{story_text}")
+        lines.append(f"\n{i}. {story_text}")
         for criteria in entry.get("acceptance_criteria", [])[:3]:
             lines.append(f"  - AC: {criteria}")
 
     backlog = parsed.get("backlog", [])
     if backlog:
-        lines.append("\nNext Iteration Backlog:")
+        lines.append("\n ## Next Iteration Backlog:")
         for item in backlog[:3]:
             lines.append(f"- {item}")
 
@@ -687,7 +689,7 @@ def generate_wireframe_html(product_idea: str, user_stories: str | None, flow_di
     system_prompt = (
         "You are a Senior UI/UX Prototyper. Your goal is to create a low-fidelity wireframe writing HTML and Tailwind CSS code. "
         "It should deliver the core experience of the product within the low-fi wireframe."
-        "You should use the provided product idea, its user stories, acceptance criterias, and a main user flow as input. "
+        "You should use the provided product idea, its user stories + acceptance criterias, and userflow as input. "
         "Think in terms of reusable components like headers, cards, and sections."
     )
     user_prompt = f"""
@@ -699,18 +701,18 @@ def generate_wireframe_html(product_idea: str, user_stories: str | None, flow_di
         User flow (Mermaid):
         {flow_diagram or 'Unavailable.'}
 
-        ### DESIGN RULES:
-        ## **Aesthetic:** Stick to a low-fidelity wireframe design. 
+        ## DESIGN RULES:
+        ### **Aesthetic:** Stick to a low-fidelity wireframe design. 
         - Use 'grayscale' style when possible, but **be mindful of 'dark' mode** on selected systems setups.
         - Guarantee high contrast for readability (e.g., `bg-slate-900`, `text-slate-100`).
         - Use borders (`border`, `border-gray-300`) to define areas.
 
-        ##. **Images:** Do NOT use <img> tags requiring external URLs.
+        ###. **Images:** Do NOT use <img> tags requiring external URLs.
         - Instead, use placeholder divs: `<div class="w-full h-48 bg-gray-300 flex items-center justify-center">Image Placeholder</div>`
 
-        ## **Typography:** Use standard sans-serif. Use `font-bold` for headers.
+        ### **Typography:** Use standard sans-serif. Use `font-bold` for headers.
 
-        4. **Output:** - Provide ONLY the HTML structure (divs, sections, columns) aligned with the user flow and user stories.
+        **Output:** - Provide ONLY the HTML structure (divs, sections, columns) aligned with the user flow and user stories.
         - Do not write the <!DOCTYPE> or <body> tags; just the content inside.
     """
     parsed = call_ollama_json(system_prompt, user_prompt, wireframe_schema)
@@ -933,10 +935,10 @@ def run_spec_qa_review(
     parsed = call_ollama_json(system_prompt, user_prompt, qa_schema, reasoning=True)
     if not parsed:
         return json.dumps({"verdict": "fail", "findings": [{"severity": "critical", "title": "QA Failure", "details": "Could not generate a structured QA response for the spec."}] }, indent=2)
-    lines = [f"Verdict: {parsed.get('verdict', 'unknown')}"]
+    lines = [f"## Verdict: {parsed.get('verdict', 'unknown')}"]
     findings = parsed.get("findings") or []
     if findings:
-        lines.append("Findings:")
+        lines.append("## Findings:")
         for finding in findings:
             sev = finding.get("severity") or "info"
             title = finding.get("title") or "Issue"
@@ -944,7 +946,7 @@ def run_spec_qa_review(
             lines.append(f"- [{sev}] {title}: {details}")
     recs = parsed.get("recommendations") or []
     if recs:
-        lines.append("Recommendations:")
+        lines.append("## Recommendations:")
         for rec in recs:
             lines.append(f"- {rec}")
     return "\n".join(lines).strip()
@@ -980,7 +982,7 @@ def generate_engineering_code(
     API Specification (source of truth):
     {spec_contract or 'Unavailable.'}
 
-    Based on the spec and user stories, provide a detailed implementation plan in pseudo-code.
+    Based on the API specification and user stories, provide a detailed implementation plan in pseudo-code.
     """
     logger.info("... Generating engineering implementation plan with reasoning model.")
     plan_parsed = call_ollama_json(plan_system_prompt, plan_user_prompt, plan_schema, reasoning=True)
@@ -1025,15 +1027,13 @@ def generate_engineering_code(
     if code_parsed and code_parsed.get("file_name") and code_parsed.get("code"):
         file_name = code_parsed["file_name"]
         code = code_parsed["code"]
-        # Combine the plan and code into a single artifact
-        combined_artifact = f'''
-"""
-Implementation Plan:
-{implementation_plan}
-"""
-{code}
-'''
-        return file_name, combined_artifact.strip()
+        # Combine the plan and code into a single structured JSON artifact
+        combined_artifact = {
+            "plan": implementation_plan,
+            "code": code
+        }
+        # Return the file name and the JSON string
+        return file_name, json.dumps(combined_artifact, indent=2)
 
     return "main.py", "# Code generation failed."
 
@@ -1277,11 +1277,20 @@ def engineering_node(state: AgentState):
     state['engineering_code'] = code or "# Code generation failed"
 
     logger.info("... Running QA to review code")
+    # Extract the raw Python code from the JSON artifact
+    try:
+        parsed_artifact = json.loads(code)
+        python_code = parsed_artifact.get("code", "")
+    except (json.JSONDecodeError, TypeError, AttributeError):
+        # This block will now execute if 'code' is None, empty, or not valid JSON.
+        logger.warning("Failed to parse engineering artifact as JSON. Passing raw content to QA.")
+        python_code = code or "" # Fallback to using the raw string if parsing fails.
+
     qa_review = run_engineering_qa_review(
         state['product_idea'],
         state.get('user_stories'),
         spec_contract, # Pass only the contract to QA as well
-        code,
+        python_code,
     )
     state['engineering_qa'] = qa_review or "QA review failed"
 

@@ -28,7 +28,7 @@ This repo runs a LangGraph-based **Coordinator** that serializes a research- →
 
 ## Setup & Operations
 1. Install [Ollama](https://ollama.com) and Docker Desktop (the app communicates with `http://host.docker.internal:11434`).
-2. Pull the reasoning model (`deepseek-r1:8b-0528-qwen3-q4_K_M`) and coding model (`qwen2.5-coder:7b-instruct-q6_K`) so the reasoning/coding prompts stay aligned.
+2. Pull the reasoning model (`deepseek-r1:8b-llama-distill-q4_K_M`) and coding model (`qwen2.5-coder:7b-instruct-q6_K`) so the reasoning/coding prompts stay aligned.
 3. Copy `.env.example` → `.env`, set `PERPLEXITY_API_KEY` if available, and optionally override `OLLAMA_BASE_URL`, `OLLAMA_REASONING_MODEL`, `OLLAMA_CODING_MODEL`, and `DATABASE_URL`/`CHECKPOINTS_PATH`.
 4. `docker-compose up -d --build` to launch the stack (it seeds `tasks.db` and `checkpoints.sqlite`, or creates the parent data directory if missing).
 5. Use `index.html` for submitting ideas and approving artifacts, and `tasks.html`/`/tasks/export` for dashboards and exports.

@@ -13,11 +13,11 @@ Ensure your machine meets the following before launching the stack:
 Ollama hosts the LLMs locally. Run:
 
 ```bash
-ollama pull deepseek-r1:8b-0528-qwen3-q4_K_M
+ollama pull deepseek-r1:8b-llama-distill-q4_K_M
 ollama pull qwen2.5-coder:7b-instruct-q6_K
 ```
 
-The reasoning tasks (PM + GTM agents) prefer `deepseek-r1:8b-0528-qwen3-q4_K_M`; UX, Engineering, and QA prompts rely on `qwen2.5-coder:7b-instruct-q6_K`.
+The reasoning tasks (PM + GTM agents) prefer `deepseek-r1:8b-llama-distill-q4_K_M`; UX, Engineering, and QA prompts rely on `qwen2.5-coder:7b-instruct-q6_K`.
 
 ## Install Dependencies (Optional, for local dev)
 
@@ -37,7 +37,7 @@ These packages support LangGraph checkpoints, DuckDuckGo fallbacks, and Perplexi
 ## Environment Variables
 
 - `PERPLEXITY_API_KEY` (optional): When set, the Research agent calls Perplexity’s `sonar-pro` model, logs the masked key, and expects structured JSON with summary/opportunity/risk/reference fields. Without the key or when the call fails, the agent automatically runs DuckDuckGo (`ddgs`) as a fallback.
-- `OLLAMA_REASONING_MODEL` (optional): Defaults to `deepseek-r1:8b-0528-qwen3-q4_K_M`; used for PRD, user stories, architect reasoning, and QA reviews.
+- `OLLAMA_REASONING_MODEL` (optional): Defaults to `deepseek-r1:8b-llama-distill-q4_K_M`; used for PRD, user stories, architect reasoning, and QA reviews.
 - `OLLAMA_CODING_MODEL` (optional): Defaults to `qwen2.5-coder:7b-instruct-q6_K`; used for UX diagrams/wireframes, spec contracts, and prototype code generation.
 - `OLLAMA_MODEL` (optional): Single fallback if the model-specific values are unset.
 - `OLLAMA_BASE_URL` (optional): Defaults to `http://host.docker.internal:11434`. Change only if Ollama exposes a different host/port.
