@@ -11,7 +11,7 @@ class Settings(BaseSettings):
         "deepseek-r1:8b-0528-qwen3-q4_K_M", env="OLLAMA_REASONING_MODEL"
     )
     ollama_coding_model: str = Field(
-        "qwen2.5-coder:7b-instruct-q6_K", env="OLLAMA_CODING_MODEL"
+        "granite3.3:8b", env="OLLAMA_CODING_MODEL"
     )
     ollama_model: str | None = Field(
         "gemma3:4b", env="OLLAMA_MODEL"

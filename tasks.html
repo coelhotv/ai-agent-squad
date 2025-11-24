@@ -201,8 +201,10 @@
                     <td><div class="wide-cell"><pre>${escapeHtml(task.user_stories || '')}</pre></div></td>
                     <td><div class="wide-cell"><pre>${escapeHtml(task.user_flow_diagram || '')}</pre></div></td>
                     <td><div class="wide-cell"><pre>${escapeHtml(task.wireframe_html || '')}</pre></div></td>
+                    <td><div class="wide-cell"><pre>${escapeHtml(task.reasoning_spec || '')}</pre></div></td>
                     <td><div class="wide-cell"><pre>${escapeHtml(task.engineering_spec || '')}</pre></div></td>
                     <td><div class="wide-cell"><pre>${escapeHtml(task.engineering_spec_qa || '')}</pre></div></td>
+                    <td><div class="wide-cell"><pre>${escapeHtml(task.reasoning_code || '')}</pre></div></td>
                     <td><div class="wide-cell"><pre>${escapeHtml(task.engineering_code || '')}</pre></div></td>
                     <td><div class="wide-cell"><pre>${escapeHtml(task.engineering_qa || '')}</pre></div></td>
                     <td>${escapeHtml(task.last_rejected_step || '')}</td>
@@ -225,8 +227,10 @@
                                 <th>User Stories</th>
                                 <th>User Flow Diagram</th>
                                 <th>Wireframe HTML</th>
+                                <th>Spec Reasoning</th>
                                 <th>Eng. Spec</th>
                                 <th>Eng. Spec QA</th>
+                                <th>Code Reasoning</th>
                                 <th>Eng. Prototype</th>
                                 <th>Engineering QA</th>
                                 <th>Last Rejected Step</th>

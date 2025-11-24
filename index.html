@@ -542,6 +542,13 @@
                     </div>
                 </div>
                 <details id="engineering-spec-results">
+                    <summary>Engineering Spec Reasoning</summary>
+                    <div class="artifact-row">
+                        <pre id="engineering-spec-reasoning">No reasoning yet.</pre>
+                        <button class="edit-btn" type="button" data-artifact="reasoning_spec">Edit</button>
+                    </div>
+                </details>
+                <details id="engineering-spec-contract-results">
                     <summary>Engineering Spec</summary>
                     <div class="artifact-row">
                         <pre id="engineering-spec">No spec yet.</pre>
@@ -553,6 +560,13 @@
                     <div class="artifact-row">
                         <pre id="engineering-spec-qa">No spec QA yet.</pre>
                         <button class="edit-btn" type="button" data-artifact="engineering_spec_qa">Edit</button>
+                    </div>
+                </details>
+                <details id="engineering-code-reasoning-results">
+                    <summary>Engineering Code Reasoning</summary>
+                    <div class="artifact-row">
+                        <pre id="engineering-code-reasoning">No reasoning yet.</pre>
+                        <button class="edit-btn" type="button" data-artifact="reasoning_code">Edit</button>
                     </div>
                 </details>
                 <details id="engineering-code-results">
@@ -615,8 +629,10 @@
         const viewFlowBtn = document.getElementById('view-flow-btn');
         const viewWireframeBtn = document.getElementById('view-wireframe-btn');
         const engineeringFileName = document.getElementById('engineering-filename');
+        const engineeringSpecReasoning = document.getElementById('engineering-spec-reasoning');
         const engineeringSpec = document.getElementById('engineering-spec');
         const engineeringSpecQa = document.getElementById('engineering-spec-qa');
+        const engineeringCodeReasoning = document.getElementById('engineering-code-reasoning');
         const engineeringCode = document.getElementById('engineering-code');
         const engineeringQa = document.getElementById('engineering-qa');
         const engineeringQaContent = document.getElementById('engineering-qa-content');
@@ -642,8 +658,10 @@
             user_stories: document.getElementById('stories-content'),
             user_flow_diagram: document.getElementById('flow-status'),
             wireframe_html: document.getElementById('wireframe-status'),
+            reasoning_spec: engineeringSpecReasoning,
             engineering_spec: engineeringSpec,
             engineering_spec_qa: engineeringSpecQa,
+            reasoning_code: engineeringCodeReasoning,
             engineering_code: engineeringCode,
             engineering_qa: engineeringQaContent,
         };
@@ -656,7 +674,9 @@
             { key: 'pending_prd_approval', label: 'PRD', description: 'Product requirements' },
             { key: 'pending_story_approval', label: 'User Stories', description: 'Stories & ACs' },
             { key: 'pending_ux_approval', label: 'UX Design', description: 'Flows & wireframes' },
+            { key: 'pending_spec_reasoning_approval', label: 'Spec Reasoning', description: 'Architect plan' },
             { key: 'pending_spec_approval', label: 'Eng. Spec', description: 'API spec & QA' },
+            { key: 'pending_code_reasoning_approval', label: 'Code Reasoning', description: 'Developer plan' },
             { key: 'pending_code_approval', label: 'Eng. Code', description: 'Code prototype & QA' },
             { key: 'ready_for_gtm', label: 'GTM Handoff', description: 'Ready for launch docs' },
             { key: 'processing', label: 'Processing', description: 'Agent at work' },
@@ -670,7 +690,9 @@
             'pending_prd_approval',
             'pending_story_approval',
             'pending_ux_approval',
+            'pending_spec_reasoning_approval',
             'pending_spec_approval',
+            'pending_code_reasoning_approval',
             'pending_code_approval',
             'ready_for_gtm',
             'processing',
@@ -684,7 +706,9 @@
             pending_prd_approval: 'Product Agent',
             pending_story_approval: 'Product Agent',
             pending_ux_approval: 'UX Designer',
+            pending_spec_reasoning_approval: 'Architect Agent',
             pending_spec_approval: 'Architect Agent',
+            pending_code_reasoning_approval: 'Engineering Agent',
             pending_code_approval: 'Engineering Agent',
             processing: 'Agent at work...',
             ready_for_gtm: 'GTM Agent',
@@ -735,7 +759,9 @@
             'pending_prd_approval',
             'pending_story_approval',
             'pending_ux_approval',
+            'pending_spec_reasoning_approval',
             'pending_spec_approval',
+            'pending_code_reasoning_approval',
             'pending_code_approval',
             'pending_approval',
         ]);
@@ -745,7 +771,9 @@
             pending_prd_approval: ['prd_summary'],
             pending_story_approval: ['user_stories'],
             pending_ux_approval: ['user_flow_diagram', 'wireframe_html'],
+            pending_spec_reasoning_approval: ['reasoning_spec'],
             pending_spec_approval: ['engineering_spec', 'engineering_spec_qa'],
+            pending_code_reasoning_approval: ['reasoning_code'],
             pending_code_approval: ['engineering_code'],
         };
 
@@ -843,8 +871,10 @@
             renderArtifact(storiesContent, null);
             renderFlowDiagram(null);
             renderWireframe(null);
+            renderArtifact(engineeringSpecReasoning, null);
             renderArtifact(engineeringSpec, null);
             renderArtifact(engineeringSpecQa, null);
+            renderArtifact(engineeringCodeReasoning, null);
             renderEngineeringPrototype(null, null);
             renderArtifact(engineeringQaContent, null);
         }
@@ -855,8 +885,10 @@
             renderArtifact(storiesContent, task?.user_stories);
             renderFlowDiagram(task?.user_flow_diagram);
             renderWireframe(task?.wireframe_html);
+            renderArtifact(engineeringSpecReasoning, task?.reasoning_spec);
             renderArtifact(engineeringSpec, task?.engineering_spec);
             renderArtifact(engineeringSpecQa, task?.engineering_spec_qa);
+            renderArtifact(engineeringCodeReasoning, task?.reasoning_code);
             renderEngineeringPrototype(task?.engineering_file_name, task?.engineering_code);
             renderArtifact(engineeringQaContent, task?.engineering_qa);
         }

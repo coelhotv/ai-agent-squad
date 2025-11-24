@@ -1,4 +1,4 @@
-# version 0.7 -- unbundling of engineering agents (reasoning as a separate step)
+# version 0.6 -- major refactor on engineering agents (schemas validations and qa warnings)
 
 import os
 import json
@@ -64,10 +64,8 @@ class Task(Base):
     user_stories = Column(Text, nullable=True)
     user_flow_diagram = Column(Text, nullable=True)
     wireframe_html = Column(Text, nullable=True)
-    reasoning_spec = Column(Text, nullable=True)
     engineering_spec = Column(Text, nullable=True)
     engineering_spec_qa = Column(Text, nullable=True)
-    reasoning_code = Column(Text, nullable=True)
     engineering_file_name = Column(Text, nullable=True)
     engineering_code = Column(Text, nullable=True)
     engineering_qa = Column(Text, nullable=True)
@@ -89,11 +87,9 @@ for col_name in (
     "user_stories",
     "user_flow_diagram",
     "wireframe_html",
-    "reasoning_spec",
+    "engineering_file_name",
     "engineering_spec",
     "engineering_spec_qa",
-    "reasoning_code",
-    "engineering_file_name",
     "engineering_code",
     "engineering_qa",
     "last_rejected_step",
@@ -119,10 +115,8 @@ class AgentState(TypedDict):
     user_stories: Optional[str]
     user_flow_diagram: Optional[str]
     wireframe_html: Optional[str]
-    reasoning_spec: Optional[str]
     engineering_spec: Optional[str]
     engineering_spec_qa: Optional[str]
-    reasoning_code: Optional[str]
     engineering_file_name: Optional[str]
     engineering_code: Optional[str]
     engineering_qa: Optional[str]
@@ -1026,7 +1020,6 @@ def generate_engineering_spec(
     user_stories: str | None,
     wireframe_html: str | None,
     qa_feedback: str | None = None,
-    reasoning_override: str | None = None,
 ) -> str:
     # --- Step 1: Generate the reasoning steps with the reasoning model ---
     reasoning_schema = {
@@ -1066,19 +1059,8 @@ def generate_engineering_spec(
 
     When you describe the `detailed_steps`, show how each step satisfies the exact Acceptance Criteria (e.g., 'AC 1.1, AC 1.3') and cite the schema/endpoint that will deliver it. After the reasoning steps, include a short checklist that reconfirms the rules (demo-only, no auth, AC coverage).
     """
-    reasoning_parsed = None
-    warnings: list[str] = []
-    if reasoning_override:
-        try:
-            parsed_override = json.loads(reasoning_override)
-            if isinstance(parsed_override, dict) and parsed_override.get("detailed_steps"):
-                reasoning_parsed = parsed_override
-        except json.JSONDecodeError:
-            logger.warning("Could not parse reasoning_override; falling back to generation.")
-
-    if not reasoning_parsed:
-        logger.info("... Generating architect reasoning steps with reasoning model.")
-        reasoning_parsed = call_ollama_json(reasoning_system_prompt, reasoning_user_prompt, reasoning_schema, reasoning=True)
+    logger.info("... Generating architect reasoning steps with reasoning model.")
+    reasoning_parsed = call_ollama_json(reasoning_system_prompt, reasoning_user_prompt, reasoning_schema, reasoning=True)
 
     if not reasoning_parsed or not reasoning_parsed.get("detailed_steps"):
         logger.error(f"""... Failed to generate reasoning steps. LLM output: {reasoning_parsed}""")
@@ -1087,7 +1069,8 @@ def generate_engineering_spec(
         }, indent=2)
 
     reasoning_steps = reasoning_parsed["detailed_steps"]
-    logger.info("... Architect reasoning steps ready.")
+    logger.info("... Architect reasoning steps generated successfully.")
+    warnings: list[str] = []
     violations = detect_demo_constraint_violations(reasoning_steps)
     if violations:
         warning = (
@@ -1356,7 +1339,6 @@ def generate_engineering_code(
     product_idea: str,
     user_stories: str | None,
     spec_contract: str | None,
-    plan_override: str | None = None,
 ) -> tuple[str, str]:
     implementation_plan = "# No implementation plan was generated."
     contract_data = {}
@@ -1407,43 +1389,35 @@ def generate_engineering_code(
     Based on the API specification and user stories, provide a detailed implementation plan in pseudo-code.
     {warnings_block}
     """
-    if plan_override:
-        try:
-            parsed_override = json.loads(plan_override)
-            if isinstance(parsed_override, dict) and parsed_override.get("implementation_plan"):
-                implementation_plan = parsed_override["implementation_plan"]
-        except json.JSONDecodeError:
-            logger.warning("Could not parse plan_override; falling back to generation.")
-
+    max_plan_retries = 2
+    plan_retry = 0
+    plan_prompt_suffix = ""
     plan_parsed = None
-    if not _implementation_plan_sufficient(implementation_plan):
-        max_plan_retries = 2
-        plan_retry = 0
-        plan_prompt_suffix = ""
-        while plan_retry <= max_plan_retries:
-            plan_user_prompt = plan_base_prompt + plan_prompt_suffix
-            attempt_num = plan_retry + 1
-            total_attempts = max_plan_retries + 1
-            logger.info(
-                "... Generating engineering implementation plan with reasoning model (attempt %d/%d).",
-                attempt_num,
-                total_attempts,
+    implementation_plan = implementation_plan
+    while plan_retry <= max_plan_retries:
+        plan_user_prompt = plan_base_prompt + plan_prompt_suffix
+        attempt_num = plan_retry + 1
+        total_attempts = max_plan_retries + 1
+        logger.info(
+            "... Generating engineering implementation plan with reasoning model (attempt %d/%d).",
+            attempt_num,
+            total_attempts,
+        )
+        plan_parsed = call_ollama_json(plan_system_prompt, plan_user_prompt, plan_schema, reasoning=True)
+        if plan_parsed and plan_parsed.get("implementation_plan"):
+            implementation_plan = plan_parsed["implementation_plan"]
+            if _implementation_plan_sufficient(implementation_plan):
+                break
+            plan_prompt_suffix = (
+                "\nFollowing the previous attempt, expand the plan with at least three numbered steps, "
+                "referencing the relevant ACs and laying out the per-endpoint data flow."
             )
-            plan_parsed = call_ollama_json(plan_system_prompt, plan_user_prompt, plan_schema, reasoning=True)
-            if plan_parsed and plan_parsed.get("implementation_plan"):
-                implementation_plan = plan_parsed["implementation_plan"]
-                if _implementation_plan_sufficient(implementation_plan):
-                    break
-                plan_prompt_suffix = (
-                    "\nFollowing the previous attempt, expand the plan with at least three numbered steps, "
-                    "referencing the relevant ACs and laying out the per-endpoint data flow."
-                )
-                plan_retry += 1
-                continue
-            break
-        if not _implementation_plan_sufficient(implementation_plan):
-            logger.error("... Failed to generate implementation plan.")
-            return "main.py", "# Code generation failed: Could not create an implementation plan."
+            plan_retry += 1
+            continue
+        break
+    if not plan_parsed or not plan_parsed.get("implementation_plan"):
+        logger.error("... Failed to generate implementation plan.")
+        return "main.py", "# Code generation failed: Could not create an implementation plan."
 
     if not plan_parsed or not plan_parsed.get("implementation_plan"):
         logger.error("... Failed to generate implementation plan.")
@@ -1738,63 +1712,16 @@ def ux_design_node(state: AgentState):
     return state
 
 
-def engineering_spec_reasoning_node(state: AgentState):
-    logger.info(f"--- Node: engineering_spec_reasoning_node (Task ID: {state['task_id']}) ---")
-    reasoning_schema = {
-        "type": "object",
-        "properties": {
-            "detailed_steps": {
-                "type": "array",
-                "description": "Explain your step-by-step plan to meet all user stories and acceptance criteria before defining schemas.",
-                "items": {"type": "string"},
-            }
-        },
-        "required": ["detailed_steps"],
-    }
-    reasoning_system_prompt = (
-        "You are a Senior Software Architect specializing in FastAPI, Pydantic v2, and uvicorn.\n"
-        "Your task is to create a step-by-step detailed plan for a **demo-only prototype API**. This is for a short-lived demo, not a production system.\n"
-        "RULES:\n"
-        "1. **MVP ONLY**: Your plan must ONLY address the user stories provided. IGNORE all backlog items, future features, or items not in the user stories. Low-fidelity wireframe is provided only for reference.\n"
-        "2. **NO PRODUCTION FEATURES**: You are FORBIDDEN from including: real authentication (JWT/OAuth), persistent databases (use in-memory only), background tasks (Celery/cron), or unit tests. Mentioning or designing these will fail the task. No `/login` or `/users/register` endpoints, no hashed passwords, and no third-party auth libraries.\n"
-        "3. **SIMULATE, DON'T BUILD**: Assume a single hardcoded user for every call. Any security-related behavior should be described as simulated (e.g., returning a mock token or static consent form). The endpoints can return static or derived data—no scheduling or multi-user logic.\n"
-        "4. **DATA FIRST**: Define the Pydantic schemas and their critical fields before any endpoints. Each schema must name the Acceptance Criteria it satisfies (e.g., 'Schema CycleEntry -> AC 1.1').\n"
-        "5. **TRACEABILITY**: Each reasoning step must mention the AC numbers it addresses and the schema/endpoint that will deliver it (e.g., 'Step 2 (AC 1.1, AC 1.3): ...').\n"
-        "6. **AC COVERAGE**: The final API contract should include only the schemas and endpoints required to meet the listed ACs. Show a short checklist at the end that reruns the rules to self-validate the plan."
-        "OUTPUT FORMAT:\n"
-        "Output your detailed steps plan only in the provided JSON schema!"
-    )
-    reasoning_user_prompt = f"""
-    Product idea: {state['product_idea']}
-
-    User stories and Acceptance Criteria:
-    {state.get('user_stories') or 'Unavailable.'}
-
-    Wireframe HTML:
-    {state.get('wireframe_html') or 'Unavailable.'}
-    """
-    reasoning_parsed = call_ollama_json(reasoning_system_prompt, reasoning_user_prompt, reasoning_schema, reasoning=True)
-    if not reasoning_parsed or not reasoning_parsed.get("detailed_steps"):
-        logger.error("... Failed to generate spec reasoning.")
-        reasoning_artifact = json.dumps({"detailed_steps": ["Failed to generate reasoning steps."]}, indent=2)
-    else:
-        reasoning_artifact = json.dumps(reasoning_parsed, indent=2)
-    state['reasoning_spec'] = reasoning_artifact
-    state['status'] = "pending_spec_reasoning_approval"
-    state['pending_approval_content'] = (
-        "Architect reasoning is ready. Review the reasoning steps and approve to generate the API contract."
-    )
-    return state
-
-
 def engineering_spec_node(state: AgentState):
     logger.info(f"--- Node: engineering_spec_node (Task ID: {state['task_id']}) ---")
+    # The retry loop with QA has been removed as the architect is now reliable
+    # and the QA agent has become unstable. We will now generate the spec once
+    # and send it directly for human approval.
     logger.info("... Running architect to generate spec.")
     spec = generate_engineering_spec(
         state['product_idea'],
         state.get('user_stories'),
         state.get('wireframe_html'),
-        reasoning_override=state.get('reasoning_spec'),
         # No longer passing QA feedback
     )
     state['engineering_spec'] = spec
@@ -1828,53 +1755,6 @@ def engineering_spec_node(state: AgentState):
     return state
 
 
-def engineering_code_reasoning_node(state: AgentState):
-    logger.info(f"--- Node: engineering_code_reasoning_node (Task ID: {state['task_id']}) ---")
-    plan_schema = {
-        "type": "object",
-        "properties": {
-            "implementation_plan": {
-                "type": "string",
-                "description": "Detailed pseudo-code or step-by-step implementation logic for each endpoint. Focus on data flow and in-memory DB interactions."
-            }
-        },
-        "required": ["implementation_plan"]
-    }
-    plan_system_prompt = (
-        "You are a Senior Engineer specialized in coding algorithms and will create an implementation plan for a demo app.\n"
-        "Your task is to write detailed pseudo-code for each endpoint in the provided API spec.\n"
-        "RULES (demo-only):\n"
-        "1. Surface the core value prop using hardcoded users, in-memory data, and no production services—this is a short-lived demo.\n"
-        "2. For each endpoint, detail the logic: how to handle the request, what data to fetch from the in-memory `DB`, how to process it, and what to return.\n"
-        "3. Describe exactly how you will capture detailed event-level entries, persist them across sessions, and aggregate them into counters or summaries so live views remain consistent for the single persona.\n"
-        "4. Show how notification simulators will queue reminders, toggle delivery state, or log retries so push behavior can be inspected without real providers.\n"
-        "5. Reference every relevant Acceptance Criterion within the steps (e.g., 'Step 2 (AC 1.2): ...').\n"
-        "6. Provide at least three numbered steps and explain how each step maps to the data models or endpoints.\n"
-        "7. Plan for an in-memory database (a Python dictionary `DB = {}`). Specify how you will structure and access data (e.g., `DB['users']`, `DB['sessions']`).\n"
-        "8. Simulate any security/privacy behavior: use mock tokens, encrypted blobs, or consent placeholders and never install real auth/encryption libraries."
-    )
-    plan_user_prompt = f"""
-    Product Idea (for context): {state['product_idea']}
-    User Stories (for business logic context): {state.get('user_stories') or 'N/A'}
-    API Specification (source of truth):
-    {state.get('engineering_spec') or 'Unavailable.'}
-
-    Based on the API specification and user stories, provide a detailed implementation plan in pseudo-code.
-    """
-    plan_parsed = call_ollama_json(plan_system_prompt, plan_user_prompt, plan_schema, reasoning=True)
-    if not plan_parsed or not plan_parsed.get("implementation_plan"):
-        logger.error("... Failed to generate implementation plan reasoning.")
-        plan_artifact = json.dumps({"implementation_plan": "# Failed to generate implementation plan."}, indent=2)
-    else:
-        plan_artifact = json.dumps(plan_parsed, indent=2)
-    state["reasoning_code"] = plan_artifact
-    state["status"] = "pending_code_reasoning_approval"
-    state["pending_approval_content"] = (
-        "Developer reasoning is ready. Review the implementation plan and approve to generate the code."
-    )
-    return state
-
-
 def engineering_node(state: AgentState):
     logger.info(f"--- Node: engineering_node (Task ID: {state['task_id']}) ---")
 
@@ -1884,7 +1764,6 @@ def engineering_node(state: AgentState):
         state['product_idea'],
         state.get('user_stories'),
         state.get('engineering_spec'),
-        plan_override=state.get('reasoning_code'),
     )
     state['engineering_file_name'] = file_name or "main.py"
     state['engineering_code'] = code or "# Code generation failed"
@@ -1927,19 +1806,15 @@ workflow.add_node("research", research_node)
 workflow.add_node("product_prd", product_prd_node)
 workflow.add_node("product_stories", product_stories_node)
 workflow.add_node("ux_design", ux_design_node)
-workflow.add_node("engineering_spec_reasoning", engineering_spec_reasoning_node)
 workflow.add_node("engineering_spec", engineering_spec_node)
-workflow.add_node("engineering_code_reasoning", engineering_code_reasoning_node)
 workflow.add_node("engineering", engineering_node)
 workflow.add_node("approved", approved_node)
 workflow.set_entry_point("research")
 workflow.add_edge("research", "product_prd")
 workflow.add_edge("product_prd", "product_stories")
 workflow.add_edge("product_stories", "ux_design")
-workflow.add_edge("ux_design", "engineering_spec_reasoning")
-workflow.add_edge("engineering_spec_reasoning", "engineering_spec")
-workflow.add_edge("engineering_spec", "engineering_code_reasoning")
-workflow.add_edge("engineering_code_reasoning", "engineering")
+workflow.add_edge("ux_design", "engineering_spec")
+workflow.add_edge("engineering_spec", "engineering")
 workflow.add_edge("engineering", "approved")
 workflow.add_edge("approved", END)
 
@@ -1956,9 +1831,7 @@ async def initialize_graph():
             "product_prd",
             "product_stories",
             "ux_design",
-            "engineering_spec_reasoning",
             "engineering_spec",
-            "engineering_code_reasoning",
             "engineering",
             "approved",
         ],
@@ -2005,10 +1878,8 @@ class TaskStatus(BaseModel):
     user_stories: Optional[str] = None
     user_flow_diagram: Optional[str] = None
     wireframe_html: Optional[str] = None
-    reasoning_spec: Optional[str] = None
     engineering_spec: Optional[str] = None
     engineering_spec_qa: Optional[str] = None
-    reasoning_code: Optional[str] = None
     engineering_file_name: Optional[str] = None
     engineering_code: Optional[str] = None
     engineering_qa: Optional[str] = None
@@ -2040,9 +1911,7 @@ PENDING_STATUSES = {
     "pending_prd_approval",
     "pending_story_approval",
     "pending_ux_approval",
-    "pending_spec_reasoning_approval",
     "pending_spec_approval",
-    "pending_code_reasoning_approval",
     "pending_code_approval",
     "pending_approval",
 }
@@ -2053,9 +1922,7 @@ STEP_STATUS_MAP = {
     "product_prd": "pending_prd_approval",
     "product_stories": "pending_story_approval",
     "ux_design": "pending_ux_approval",
-    "engineering_spec_reasoning": "pending_spec_reasoning_approval",
     "engineering_spec": "pending_spec_approval",
-    "engineering_code_reasoning": "pending_code_reasoning_approval",
     "engineering_code": "pending_code_approval",
 }
 
@@ -2069,10 +1936,8 @@ def clear_artifacts_for_step(db_task: Task, step: str):
             "user_stories",
             "user_flow_diagram",
             "wireframe_html",
-            "reasoning_spec",
             "engineering_spec",
             "engineering_spec_qa",
-            "reasoning_code",
             "engineering_file_name",
             "engineering_code",
             "engineering_qa",
@@ -2082,10 +1947,8 @@ def clear_artifacts_for_step(db_task: Task, step: str):
             "user_stories",
             "user_flow_diagram",
             "wireframe_html",
-            "reasoning_spec",
             "engineering_spec",
             "engineering_spec_qa",
-            "reasoning_code",
             "engineering_file_name",
             "engineering_code",
             "engineering_qa",
@@ -2094,10 +1957,8 @@ def clear_artifacts_for_step(db_task: Task, step: str):
             "user_stories",
             "user_flow_diagram",
             "wireframe_html",
-            "reasoning_spec",
             "engineering_spec",
             "engineering_spec_qa",
-            "reasoning_code",
             "engineering_file_name",
             "engineering_code",
             "engineering_qa",
@@ -2106,19 +1967,8 @@ def clear_artifacts_for_step(db_task: Task, step: str):
             "user_flow_diagram",
             "wireframe_html",
             "engineering_file_name",
-            "reasoning_spec",
             "engineering_spec",
             "engineering_spec_qa",
-            "reasoning_code",
-            "engineering_file_name",
-            "engineering_code",
-            "engineering_qa",
-        ],
-        "engineering_spec_reasoning": [
-            "reasoning_spec",
-            "engineering_spec",
-            "engineering_spec_qa",
-            "reasoning_code",
             "engineering_file_name",
             "engineering_code",
             "engineering_qa",
@@ -2126,13 +1976,6 @@ def clear_artifacts_for_step(db_task: Task, step: str):
         "engineering_spec": [
             "engineering_spec",
             "engineering_spec_qa",
-            "reasoning_code",
-            "engineering_file_name",
-            "engineering_code",
-            "engineering_qa",
-        ],
-        "engineering_code_reasoning": [
-            "reasoning_code",
             "engineering_file_name",
             "engineering_code",
             "engineering_qa",
@@ -2156,9 +1999,7 @@ def status_to_step(status: str | None) -> Optional[str]:
         "pending_prd_approval": "product_prd",
         "pending_story_approval": "product_stories",
         "pending_ux_approval": "ux_design",
-        "pending_spec_reasoning_approval": "engineering_spec_reasoning",
         "pending_spec_approval": "engineering_spec",
-        "pending_code_reasoning_approval": "engineering_code_reasoning",
         "pending_code_approval": "engineering_code",
     }
     return inverse.get(status)
@@ -2175,10 +2016,8 @@ def build_state_from_task(db_task: Task) -> AgentState:
         "user_stories": db_task.user_stories,
         "user_flow_diagram": db_task.user_flow_diagram,
         "wireframe_html": db_task.wireframe_html,
-        "reasoning_spec": db_task.reasoning_spec,
         "engineering_spec": db_task.engineering_spec,
         "engineering_spec_qa": db_task.engineering_spec_qa,
-        "reasoning_code": db_task.reasoning_code,
         "engineering_file_name": db_task.engineering_file_name,
         "engineering_code": db_task.engineering_code,
         "engineering_qa": db_task.engineering_qa,
@@ -2214,10 +2053,8 @@ async def start_task(request: StartTaskRequest, db: Session = Depends(get_db)):
         user_stories=None,
         user_flow_diagram=None,
         wireframe_html=None,
-        reasoning_spec=None,
         engineering_spec=None,
         engineering_spec_qa=None,
-        reasoning_code=None,
         engineering_file_name=None,
         engineering_code=None,
         engineering_qa=None,
@@ -2243,10 +2080,8 @@ async def start_task(request: StartTaskRequest, db: Session = Depends(get_db)):
     db_task.user_stories = interrupted_state.values.get('user_stories')
     db_task.user_flow_diagram = interrupted_state.values.get('user_flow_diagram')
     db_task.wireframe_html = interrupted_state.values.get('wireframe_html')
-    db_task.reasoning_spec = interrupted_state.values.get('resoning_spec')
     db_task.engineering_spec = interrupted_state.values.get('engineering_spec')
     db_task.engineering_spec_qa = interrupted_state.values.get('engineering_spec_qa')
-    db_task.reasoning_code = interrupted_state.values.get('resoning_code')
     db_task.engineering_file_name = interrupted_state.values.get('engineering_file_name')
     db_task.engineering_code = interrupted_state.values.get('engineering_code')
     db_task.engineering_qa = interrupted_state.values.get('engineering_qa')
@@ -2265,10 +2100,9 @@ def get_pending_approval(db: Session = Depends(get_db)):
         "pending_prd_approval",
         "pending_story_approval",
         "pending_ux_approval",
-        "pending_spec_reasoning_approval",
         "pending_spec_approval",
-        "pending_code_reasoning_approval",
         "pending_code_approval",
+        "pending_approval",  # backward compatibility
     ]
     pending_task = (
         db.query(Task)
@@ -2328,10 +2162,8 @@ def export_tasks(db: Session = Depends(get_db)):
             "User Stories",
             "User Flow Diagram",
             "Wireframe HTML",
-            "Reasoning Spec",
             "Engineering Spec",
             "Engineering Spec QA",
-            "Reasoning Code",
             "Engineering File Name",
             "Engineering Code",
             "Engineering QA",
@@ -2351,10 +2183,8 @@ def export_tasks(db: Session = Depends(get_db)):
                 task.user_stories or "",
                 task.user_flow_diagram or "",
                 task.wireframe_html or "",
-                task.reasoning_spec or "",
                 task.engineering_spec or "",
                 task.engineering_spec_qa or "",
-                task.reasoning_code or "",
                 task.engineering_file_name or "",
                 task.engineering_code or "",
                 task.engineering_qa or "",
@@ -2377,9 +2207,7 @@ async def respond_to_approval(request: RespondToApprovalRequest, db: Session = D
         "pending_prd_approval",
         "pending_story_approval",
         "pending_ux_approval",
-        "pending_spec_reasoning_approval",
         "pending_spec_approval",
-        "pending_code_reasoning_approval",
         "pending_code_approval",
         "pending_approval",
     }
@@ -2432,10 +2260,8 @@ async def respond_to_approval(request: RespondToApprovalRequest, db: Session = D
         'user_stories',
         'user_flow_diagram',
         'wireframe_html',
-        'reasoning_spec',
         'engineering_spec',
         'engineering_spec_qa',
-        'reasoning_code',
         'engineering_file_name',
         'engineering_code',
         'engineering_qa',
@@ -2478,9 +2304,7 @@ async def resubmit_step(request: ResubmitRequest, db: Session = Depends(get_db))
         "product_prd": product_prd_node,
         "product_stories": product_stories_node,
         "ux_design": ux_design_node,
-        "engineering_spec_reasoning": engineering_spec_reasoning_node,
         "engineering_spec": engineering_spec_node,
-        "engineering_code_reasoning": engineering_code_reasoning_node,
         "engineering_code": engineering_node,
     }
     step_fn = step_fn_map.get(request.step)
@@ -2527,9 +2351,7 @@ def get_next_status(current_status: Optional[str]) -> Optional[str]:
         "pending_prd_approval",
         "pending_story_approval",
         "pending_ux_approval",
-        "pending_spec_reasoning_approval",
         "pending_spec_approval",
-        "pending_code_reasoning_approval",
         "pending_code_approval",
         "ready_for_gtm",
         "completed",
