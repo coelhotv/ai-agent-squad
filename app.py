@@ -889,14 +889,6 @@ def format_warning_section(notes: list[str]) -> str:
     return "\n".join(lines)
 
 
-def _implementation_plan_sufficient(plan: str) -> bool:
-    if not plan:
-        return False
-    lines = [line.strip() for line in plan.splitlines() if line.strip()]
-    numbered_steps = [line for line in lines if re.search(r"step\s*\d", line, re.IGNORECASE)]
-    return len(numbered_steps) >= 3 or len(lines) >= 4
-
-
 def strip_rationales(text: str | None) -> str | None:
     if not text:
         return text
@@ -1223,7 +1215,6 @@ def generate_engineering_spec(
     if not contract_parsed or not contract_parsed.get("schemas") or not contract_parsed.get("endpoints"):
         logger.error("... Failed to generate API contract from reasoning steps.")
         return json.dumps({
-            "detailed_steps": reasoning_steps,
             "schemas": [],
             "endpoints": [],
             "warnings": warnings,
@@ -1231,7 +1222,6 @@ def generate_engineering_spec(
 
     # --- Step 3: Combine and return the full spec ---
     full_spec = {
-        "detailed_steps": reasoning_steps,
         "schemas": contract_parsed["schemas"],
         "endpoints": contract_parsed["endpoints"],
         "warnings": warnings,
@@ -1352,6 +1342,7 @@ def run_spec_qa_review(
     lines[0] = f"## Verdict: {verdict}"
     return "\n".join(lines).strip()
 
+
 def generate_engineering_code(
     product_idea: str,
     user_stories: str | None,
@@ -1407,50 +1398,31 @@ def generate_engineering_code(
     Based on the API specification and user stories, provide a detailed implementation plan in pseudo-code.
     {warnings_block}
     """
+    implementation_plan = implementation_plan  # start with default text
+    plan_parsed = None
     if plan_override:
         try:
             parsed_override = json.loads(plan_override)
             if isinstance(parsed_override, dict) and parsed_override.get("implementation_plan"):
                 implementation_plan = parsed_override["implementation_plan"]
+            else:
+                implementation_plan = plan_override
         except json.JSONDecodeError:
-            logger.warning("Could not parse plan_override; falling back to generation.")
+            logger.warning("Could not parse plan_override as JSON; using raw override content.")
+            implementation_plan = plan_override
 
-    plan_parsed = None
-    if not _implementation_plan_sufficient(implementation_plan):
-        max_plan_retries = 2
-        plan_retry = 0
-        plan_prompt_suffix = ""
-        while plan_retry <= max_plan_retries:
-            plan_user_prompt = plan_base_prompt + plan_prompt_suffix
-            attempt_num = plan_retry + 1
-            total_attempts = max_plan_retries + 1
-            logger.info(
-                "... Generating engineering implementation plan with reasoning model (attempt %d/%d).",
-                attempt_num,
-                total_attempts,
-            )
-            plan_parsed = call_ollama_json(plan_system_prompt, plan_user_prompt, plan_schema, reasoning=True)
-            if plan_parsed and plan_parsed.get("implementation_plan"):
-                implementation_plan = plan_parsed["implementation_plan"]
-                if _implementation_plan_sufficient(implementation_plan):
-                    break
-                plan_prompt_suffix = (
-                    "\nFollowing the previous attempt, expand the plan with at least three numbered steps, "
-                    "referencing the relevant ACs and laying out the per-endpoint data flow."
-                )
-                plan_retry += 1
-                continue
-            break
-        if not _implementation_plan_sufficient(implementation_plan):
+    if not implementation_plan or implementation_plan.strip().startswith("# Code generation failed"):
+        logger.info("... Generating implementation plan with reasoning model.")
+        plan_parsed = call_ollama_json(plan_system_prompt, plan_base_prompt, plan_schema, reasoning=True)
+        if plan_parsed and plan_parsed.get("implementation_plan"):
+            implementation_plan = plan_parsed["implementation_plan"]
+            logger.info("... Implementation plan generated successfully.")
+        else:
             logger.error("... Failed to generate implementation plan.")
             return "main.py", "# Code generation failed: Could not create an implementation plan."
 
-    if not plan_parsed or not plan_parsed.get("implementation_plan"):
-        logger.error("... Failed to generate implementation plan.")
-        return "main.py", "# Code generation failed: Could not create an implementation plan."
-
-    implementation_plan = plan_parsed.get("implementation_plan", implementation_plan)
-    logger.info("... Implementation plan generated successfully.")
+    if plan_parsed and plan_parsed.get("implementation_plan"):
+        implementation_plan = plan_parsed["implementation_plan"]
     plan_violations = detect_demo_constraint_violations([implementation_plan])
     if plan_violations:
         violation_note = (
@@ -1496,13 +1468,9 @@ def generate_engineering_code(
 
     if code_parsed and code_parsed.get("file_name") and code_parsed.get("code"):
         file_name = code_parsed["file_name"]
-        # Combine the plan and code into a single structured JSON artifact
-        combined_artifact = {
-            "plan": implementation_plan,
-            "code": code_parsed["code"]
-        }
+        code = code_parsed["code"]
         # Return the file name and the JSON string
-        return file_name, json.dumps(combined_artifact, indent=2)
+        return file_name, code
 
     logger.error("... Failed to generate Python code from implementation plan.")
     return "main.py", "# Code generation failed."
@@ -1800,31 +1768,23 @@ def engineering_spec_node(state: AgentState):
     state['engineering_spec'] = spec
 
     logger.info("... Running QA to review spec for human review.")
-    spec_contract = ""
     if spec:
-        try:
-            full_spec = json.loads(spec)
-            contract_only = {
-                "schemas": full_spec.get("schemas", []),
-                "endpoints": full_spec.get("endpoints", []),
-                "warnings": full_spec.get("warnings", []),
-            }
-            spec_contract = json.dumps(contract_only, indent=2)
-        except (json.JSONDecodeError, TypeError):
-            logger.warning("Could not parse engineering_spec to extract contract. Passing full spec.")
-            spec_contract = spec
+        qa_review_json = run_spec_qa_review(
+            state['product_idea'],
+            state.get('user_stories'),
+            spec,
+        )
+        state['engineering_spec_qa'] = qa_review_json
+    else:
+        logger.warning("Could not QA spec contract. Please reject and re-submit the stage.")
+        state['engineering_spec_qa'] = json.dumps({"verdict": "fail", "findings": [{"severity": "critical", "title": "QA Failure", "details": "Spec was unavailable for QA."}] }, indent=2)
 
-    qa_review_json = run_spec_qa_review(
-        state['product_idea'],
-        state.get('user_stories'),
-        spec_contract,
-    )
-    state['engineering_spec_qa'] = qa_review_json
     state['status'] = "pending_spec_approval"
     state['pending_approval_content'] = (
         "Architect has produced an API specification. "
         "Review the spec and the QA report, then approve to proceed to implementation."
     )
+
     return state
 
 
@@ -1879,7 +1839,6 @@ def engineering_node(state: AgentState):
     logger.info(f"--- Node: engineering_node (Task ID: {state['task_id']}) ---")
 
     # Pass the full engineering spec (including warnings) to downstream agents so they can honor constraints.
-
     file_name, code = generate_engineering_code(
         state['product_idea'],
         state.get('user_stories'),
@@ -1890,20 +1849,11 @@ def engineering_node(state: AgentState):
     state['engineering_code'] = code or "# Code generation failed"
 
     logger.info("... Running QA to review code")
-    # Extract the raw Python code from the JSON artifact
-    try:
-        parsed_artifact = json.loads(code)
-        python_code = parsed_artifact.get("code", "")
-    except (json.JSONDecodeError, TypeError, AttributeError):
-        # This block will now execute if 'code' is None, empty, or not valid JSON.
-        logger.warning("Failed to parse engineering artifact as JSON. Passing raw content to QA.")
-        python_code = code or "" # Fallback to using the raw string if parsing fails.
-
     qa_review = run_engineering_qa_review(
         state['product_idea'],
         state.get('user_stories'),
         state.get('engineering_spec'),
-        python_code,
+        code,
     )
     state['engineering_qa'] = qa_review or "QA review failed"
 
@@ -2115,7 +2065,7 @@ def clear_artifacts_for_step(db_task: Task, step: str):
             "engineering_qa",
         ],
         "engineering_spec_reasoning": [
-            "reasoning_spec",
+            # keep reasoning_spec intact so downstream reuse works
             "engineering_spec",
             "engineering_spec_qa",
             "reasoning_code",
@@ -2132,7 +2082,7 @@ def clear_artifacts_for_step(db_task: Task, step: str):
             "engineering_qa",
         ],
         "engineering_code_reasoning": [
-            "reasoning_code",
+            # keep reasoning_code intact so downstream reuse works
             "engineering_file_name",
             "engineering_code",
             "engineering_qa",
@@ -2414,6 +2364,14 @@ async def respond_to_approval(request: RespondToApprovalRequest, db: Session = D
             if hasattr(db_task, field):
                 setattr(db_task, field, value)
         await get_app_graph().aupdate_state(config, request.overrides)
+    # Ensure previously approved reasoning artifacts are preserved when resuming downstream steps
+    carry_over: dict[str, str] = {}
+    if db_task.reasoning_spec:
+        carry_over["reasoning_spec"] = db_task.reasoning_spec
+    if db_task.reasoning_code:
+        carry_over["reasoning_code"] = db_task.reasoning_code
+    if carry_over:
+        await get_app_graph().aupdate_state(config, carry_over)
 
     # 2. Define the config to resume the correct graph instance
     graph = get_app_graph()

@@ -652,6 +652,11 @@
         let lastRejectedStep = null;
         let editingArtifact = null;
         let artifactOverrides = {};
+        const reasoningFields = {
+            reasoning_spec: 'detailed_steps',
+            reasoning_code: 'implementation_plan',
+        };
+
         const artifactDisplays = {
             research_summary: document.getElementById('research-content'),
             prd_summary: document.getElementById('prd-content'),
@@ -885,10 +890,10 @@
             renderArtifact(storiesContent, task?.user_stories);
             renderFlowDiagram(task?.user_flow_diagram);
             renderWireframe(task?.wireframe_html);
-            renderArtifact(engineeringSpecReasoning, task?.reasoning_spec);
+            renderArtifact(engineeringSpecReasoning, extractReasoningDisplay('reasoning_spec', task?.reasoning_spec));
             renderArtifact(engineeringSpec, task?.engineering_spec);
             renderArtifact(engineeringSpecQa, task?.engineering_spec_qa);
-            renderArtifact(engineeringCodeReasoning, task?.reasoning_code);
+            renderArtifact(engineeringCodeReasoning, extractReasoningDisplay('reasoning_code', task?.reasoning_code));
             renderEngineeringPrototype(task?.engineering_file_name, task?.engineering_code);
             renderArtifact(engineeringQaContent, task?.engineering_qa);
         }
@@ -962,6 +967,25 @@
             element.textContent = text?.trim() || 'No content yet.';
         }
 
+        function extractReasoningDisplay(field, raw) {
+            if (!raw) return null;
+            const key = reasoningFields[field];
+            if (!key) return raw;
+            try {
+                const parsed = JSON.parse(raw);
+                const value = parsed?.[key];
+                if (Array.isArray(value)) {
+                    return value.join("\n");
+                }
+                if (typeof value === 'string') {
+                    return value;
+                }
+                return raw;
+            } catch {
+                return raw;
+            }
+        }
+
         function renderFlowDiagram(diagramText) {
             storedFlowDiagram = diagramText?.trim() || null;
             viewFlowBtn.disabled = !storedFlowDiagram;
@@ -1008,6 +1032,8 @@
                 overlayText.value = storedFlowDiagram || '';
             } else if (artifact === 'wireframe_html') {
                 overlayText.value = storedWireframeHtml || '';
+            } else if (reasoningFields[artifact]) {
+                overlayText.value = extractReasoningDisplay(artifact, artifactDisplays[artifact].textContent) || '';
             } else {
                 overlayText.value = artifactDisplays[artifact].textContent.trim();
             }
@@ -1025,10 +1051,20 @@
                 return;
             }
             const newValue = overlayText.value;
+            let content = newValue;
+            const reasoningKey = reasoningFields[editingArtifact];
+            if (reasoningKey) {
+                if (editingArtifact === 'reasoning_spec') {
+                    const lines = newValue.split('\n').map(l => l.trim()).filter(Boolean);
+                    content = JSON.stringify({ [reasoningKey]: lines });
+                } else {
+                    content = JSON.stringify({ [reasoningKey]: newValue });
+                }
+            }
             const payload = {
                 task_id: currentTaskId,
                 artifact_name: editingArtifact,
-                content: newValue,
+                content,
             };
 
             try {
@@ -1161,10 +1197,14 @@ ${storedWireframeHtml}
                     "pending_prd_approval",
                     "pending_story_approval",
                     "pending_ux_approval",
+                    "pending_spec_reasoning_approval",
                     "pending_spec_approval",
+                    "pending_code_reasoning_approval",
                     "pending_code_approval",
                     "pending_approval"
                 ].includes(data.status)) {
+                    approvalContent.textContent = data.pending_approval_content || 'Pending your review.';
+                    approvalSection.classList.remove('hidden');
                     showMessage(`Task ${data.task_id} advanced to ${data.status}. Waiting for the next approval.`);
                     markPendingTask(data);
                 } else if (data.status === 'processing') {
