@@ -1,9 +1,8 @@
-# version 0.6 -- major refactor on engineering agents (schemas validations and qa warnings)
+#version 0.5
 
 import os
 import json
 import csv
-import re
 from io import StringIO
 # --- Core Imports ---
 import uuid
@@ -512,20 +511,13 @@ def generate_prd_document(product_idea: str, research_summary: str | None) -> st
         lines.append("\n## Target Segment & Context:")
         lines.append(target_segment)
 
-    def append_section(title: str, key: str, max_items: int = 5, required: bool = False) -> None:
-        section = parsed.get(key)
-        rationale = None
-        items: list[str] = []
-        if isinstance(section, dict):
-            rationale = section.get("rationale")
-            items = section.get("items") or []
-        else:
-            items = section or []
-        if not items and not (required or rationale):
+    def append_section(title: str, key: str, max_items: int = 3, required: bool = False) -> None:
+        section = parsed.get(key) or {}
+        items = section.get("items") if isinstance(section, dict) else section
+        items = items or []
+        if not items and not required:
             return
         lines.append(f"\n## {title}:")
-        if rationale:
-            lines.append(f"Rationale: {rationale}")
         if not items:
             lines.append("Details pending.")
             return
@@ -648,7 +640,7 @@ def generate_user_stories(product_idea: str, prd_summary: str | None) -> str:
     if not parsed:
         return fallback_user_stories(product_idea)
 
-    lines = ["## User Stories:"]
+    lines = [" ## User Stories:"]
     for i, entry in enumerate(parsed.get("stories", [])[:4], 1):
         story_text = entry.get("story") or ""
         lines.append(f"\n{i}. {story_text}")
@@ -657,7 +649,7 @@ def generate_user_stories(product_idea: str, prd_summary: str | None) -> str:
 
     backlog = parsed.get("backlog", [])
     if backlog:
-        lines.append("\n## Next Iteration Backlog:")
+        lines.append("\n ## Next Iteration Backlog:")
         for item in backlog[:3]:
             lines.append(f"- {item}")
 
@@ -816,205 +808,6 @@ def fallback_wireframe_html(product_idea: str) -> str:
     )
 
 
-DEMO_BANNED_KEYWORDS = (
-    "jwt",
-    "oauth",
-    "/login",
-    "/users/register",
-    "password_hash",
-    "hashed",
-    "persistent database",
-    "postgres",
-    "mysql",
-    "sqlite",
-    "production auth",
-)
-
-
-def detect_demo_constraint_violations(steps: list[str]) -> list[str]:
-    found: list[str] = []
-    normalized = [step.lower() for step in steps]
-    for keyword in DEMO_BANNED_KEYWORDS:
-        if any(keyword in step for step in normalized):
-            found.append(keyword)
-    return found
-
-
-def normalize_ac_id(raw: str | None) -> str:
-    if not raw:
-        return ""
-    normalized = raw.strip()
-    if not normalized:
-        return ""
-    if not normalized.upper().startswith("AC"):
-        normalized = f"AC {normalized}"
-    return normalized.upper()
-
-
-def extract_acceptance_criteria(user_stories: str | None) -> set[str]:
-    if not user_stories:
-        return set()
-    matches = re.findall(r"AC\s*[:\-]?\s*([0-9]+(?:\.[0-9]+)*)", user_stories, re.IGNORECASE)
-    return {normalize_ac_id(match) for match in matches if normalize_ac_id(match)}
-
-
-def collect_contract_ac_refs(contract: dict | None) -> set[str]:
-    refs: set[str] = set()
-    if not contract:
-        return refs
-    for entry in contract.get("schemas", []) or []:
-        for ac in entry.get("ac_refs") or []:
-            norm = normalize_ac_id(ac)
-            if norm:
-                refs.add(norm)
-    for entry in contract.get("endpoints", []) or []:
-        for ac in entry.get("ac_refs") or []:
-            norm = normalize_ac_id(ac)
-            if norm:
-                refs.add(norm)
-    return refs
-
-
-def format_warning_section(notes: list[str]) -> str:
-    if not notes:
-        return ""
-    lines = ["Warnings/Constraints:"]
-    lines.extend(f"- {note}" for note in notes)
-    return "\n".join(lines)
-
-
-def _implementation_plan_sufficient(plan: str) -> bool:
-    if not plan:
-        return False
-    lines = [line.strip() for line in plan.splitlines() if line.strip()]
-    numbered_steps = [line for line in lines if re.search(r"step\s*\d", line, re.IGNORECASE)]
-    return len(numbered_steps) >= 3 or len(lines) >= 4
-
-
-def strip_rationales(text: str | None) -> str | None:
-    if not text:
-        return text
-    cleaned = re.sub(r"(?m)^Rationale:.*(?:\n|$)", "", text)
-    cleaned = re.sub(r"\n{2,}", "\n\n", cleaned.strip())
-    return cleaned or None
-
-
-def append_ac_placeholder(contract: dict[str, list], ac_id: str) -> bool:
-    template = AC_PLACEHOLDER_TEMPLATES.get(ac_id)
-    if not template:
-        return False
-    schemas = contract.setdefault("schemas", [])
-    endpoints = contract.setdefault("endpoints", [])
-    schema = template["schema"].copy()
-    if not any(entry["name"] == schema["name"] for entry in schemas):
-        schemas.append(schema)
-    endpoint = template.get("endpoint")
-    if endpoint and not any(entry["path"] == endpoint["path"] and entry["method"] == endpoint["method"] for entry in endpoints):
-        endpoints.append(endpoint.copy())
-    return True
-
-
-AC_PLACEHOLDER_TEMPLATES = {
-    "AC 1.1": {
-        "schema": {
-            "name": "CumulativeStatistics",
-            "fields": [
-                {"name": "total_smoked", "type": "int", "required": True, "validators": []},
-                {"name": "average_per_day", "type": "float", "required": True, "validators": []},
-            ],
-            "ac_refs": ["AC 1.1"],
-        },
-        "endpoint": {
-            "method": "GET",
-            "path": "/progress-bar",
-            "response_model": "CumulativeStatistics",
-            "ac_refs": ["AC 1.1"],
-        },
-    },
-    "AC 1.2": {
-        "schema": {
-            "name": "SymptomEntry",
-            "fields": [
-                {"name": "symptoms", "type": "List[str]", "required": True, "validators": []},
-                {"name": "notes", "type": "string", "required": False, "validators": []},
-            ],
-            "ac_refs": ["AC 1.2"],
-        },
-        "endpoint": {
-            "method": "POST",
-            "path": "/symptoms",
-            "response_model": "SymptomEntry",
-            "ac_refs": ["AC 1.2"],
-        },
-    },
-    "AC 1.3": {
-        "schema": {
-            "name": "CycleCalendarView",
-            "fields": [
-                {"name": "month", "type": "string", "required": True, "validators": []},
-                {"name": "highlighted_dates", "type": "List[string]", "required": True, "validators": []},
-            ],
-            "ac_refs": ["AC 1.3"],
-        },
-        "endpoint": {
-            "method": "GET",
-            "path": "/cycle/calendar",
-            "response_model": "CycleCalendarView",
-            "ac_refs": ["AC 1.3"],
-        },
-    },
-    "AC 2.1": {
-        "schema": {
-            "name": "CyclePrediction",
-            "fields": [
-                {"name": "prediction_date", "type": "date", "required": True, "validators": []},
-                {"name": "phase", "type": "string", "required": True, "validators": []},
-            ],
-            "ac_refs": ["AC 2.1"],
-        },
-        "endpoint": {
-            "method": "POST",
-            "path": "/cycle/predict",
-            "response_model": "CyclePrediction",
-            "ac_refs": ["AC 2.1"],
-        },
-    },
-    "AC 2.2": {
-        "schema": {
-            "name": "PredictedCycle",
-            "fields": [
-                {"name": "start_date", "type": "date", "required": True, "validators": []},
-                {"name": "end_date", "type": "date", "required": True, "validators": []},
-                {"name": "confidence", "type": "float", "required": False, "validators": []},
-            ],
-            "ac_refs": ["AC 2.2"],
-        },
-        "endpoint": {
-            "method": "GET",
-            "path": "/cycle/predictions",
-            "response_model": "PredictedCycle",
-            "ac_refs": ["AC 2.2"],
-        },
-    },
-    "AC 2.3": {
-        "schema": {
-            "name": "FertilityInsight",
-            "fields": [
-                {"name": "likelihood", "type": "string", "required": True, "validators": []},
-                {"name": "timeline", "type": "string", "required": True, "validators": []},
-            ],
-            "ac_refs": ["AC 2.3"],
-        },
-        "endpoint": {
-            "method": "GET",
-            "path": "/fertility/insights",
-            "response_model": "FertilityInsight",
-            "ac_refs": ["AC 2.3"],
-        },
-    },
-}
-
-
 def generate_engineering_spec(
     product_idea: str,
     user_stories: str | None,
@@ -1044,7 +837,7 @@ def generate_engineering_spec(
         "5. **TRACEABILITY**: Each reasoning step must mention the AC numbers it addresses and the schema/endpoint that will deliver it (e.g., 'Step 2 (AC 1.1, AC 1.3): ...').\n"
         "6. **AC COVERAGE**: The final API contract should include only the schemas and endpoints required to meet the listed ACs. Show a short checklist at the end that reruns the rules to self-validate the plan."
         "OUTPUT FORMAT:\n"
-        "Output your detailed steps plan only in the provided JSON schema!"
+        "Output your reasoned detailed steps plan only in the provided JSON schema!"
     )
     reasoning_user_prompt = f"""
     Product idea: {product_idea}
@@ -1060,27 +853,16 @@ def generate_engineering_spec(
     When you describe the `detailed_steps`, show how each step satisfies the exact Acceptance Criteria (e.g., 'AC 1.1, AC 1.3') and cite the schema/endpoint that will deliver it. After the reasoning steps, include a short checklist that reconfirms the rules (demo-only, no auth, AC coverage).
     """
     logger.info("... Generating architect reasoning steps with reasoning model.")
-    reasoning_parsed = call_ollama_json(reasoning_system_prompt, reasoning_user_prompt, reasoning_schema, reasoning=True)
+    detailed_parsed = call_ollama_json(reasoning_system_prompt, reasoning_user_prompt, reasoning_schema, reasoning=True)
 
-    if not reasoning_parsed or not reasoning_parsed.get("detailed_steps"):
-        logger.error(f"""... Failed to generate reasoning steps. LLM output: {reasoning_parsed}""")
+    if not detailed_parsed or not detailed_parsed.get("detailed_steps"):
+        logger.error(f"""... Failed to generate reasoning steps. LLM output: {detailed_parsed}""")
         return json.dumps({
             "detailed_steps": ["Failed to generate reasoning steps."]
         }, indent=2)
 
-    reasoning_steps = reasoning_parsed["detailed_steps"]
+    detailed_steps = detailed_parsed["detailed_steps"]
     logger.info("... Architect reasoning steps generated successfully.")
-    warnings: list[str] = []
-    violations = detect_demo_constraint_violations(reasoning_steps)
-    if violations:
-        warning = (
-            "Detected references to forbidden demo features: "
-            f"{', '.join(sorted(set(violations)))}. Please keep the plan limited to simulated behavior."
-        )
-        logger.warning(warning)
-        warnings.append(warning)
-        reasoning_steps.append(f"NOTE: {warning}")
-    user_ac_set = extract_acceptance_criteria(user_stories)
 
     # --- Step 2: Generate the schemas and endpoints with the coding model ---
     contract_schema = {
@@ -1105,11 +887,6 @@ def generate_engineering_spec(
                                 "required": ["name", "type", "required"],
                             },
                         },
-                        "ac_refs": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "Acceptance criteria this schema fulfills",
-                        },
                     },
                     "required": ["name", "fields"],
                 },
@@ -1123,11 +900,6 @@ def generate_engineering_spec(
                         "path": {"type": "string"},
                         "response_model": {"type": "string"},
                         "errors": {"type": "array", "items": {"type": "string"}},
-                        "ac_refs": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "Acceptance criteria this endpoint satisfies",
-                        },
                     },
                     "required": ["method", "path", "response_model"],
                 },
@@ -1142,82 +914,32 @@ def generate_engineering_spec(
         "2. Define all Pydantic v2 models in the `schemas` list.\n"
         "3. Define all RESTful endpoints in the `endpoints` list.\n"
         "4. Ensure every model used in an endpoint's `response_model` is defined in `schemas`.\n"
-        "5. Every schema and endpoint must include an `ac_refs` array that lists the Acceptance Criteria it satisfies (e.g., 'AC 1.1').\n"
-        "6. Output only the JSON structure."
+        "5. Output only the JSON structure."
     )
-    contract_user_prompt_base = f"""
+    contract_user_prompt = f"""
     Architect's Plan (Reasoning Steps):
-    {reasoning_steps}
+    {detailed_steps}
 
     {'Previous attempt QA feedback: ' + qa_feedback if qa_feedback else ''}
     
     Now, generate the `schemas` and `endpoints` JSON based on this plan.
-    Each schema and endpoint must list the specific Acceptance Criteria it covers via the `ac_refs` field.
     """
-    contract_prompt_suffix = ""
-    contract_parsed = None
-    retry_count = 0
-    max_retries = 1
-    while True:
-        contract_user_prompt = contract_user_prompt_base + contract_prompt_suffix
-        logger.info("... Generating API contract with coding model.")
-        contract_parsed = call_ollama_json(contract_system_prompt, contract_user_prompt, contract_schema)
-        if not contract_parsed or not contract_parsed.get("schemas") or not contract_parsed.get("endpoints"):
-            logger.error("... Failed to generate API contract from reasoning steps.")
-            break
-        contract_ac_refs = collect_contract_ac_refs(contract_parsed)
-        missing_ac = sorted(user_ac_set - contract_ac_refs)
-        if not missing_ac:
-            break
-        added_ac: list[str] = []
-        for ac in missing_ac:
-            if append_ac_placeholder(contract_parsed, ac):
-                added_ac.append(ac)
-        if added_ac:
-            note = (
-                "Automatically added placeholder schemas/endpoints to cover missing ACs: "
-                f"{', '.join(sorted(set(added_ac)))}."
-            )
-            warnings.append(note)
-            logger.warning(note)
-            contract_ac_refs = collect_contract_ac_refs(contract_parsed)
-            missing_ac = sorted(user_ac_set - contract_ac_refs)
-            if not missing_ac:
-                break
-        warning = (
-            "Missing AC coverage in the contract: "
-            f"{', '.join(missing_ac)}."
-        )
-        if retry_count < max_retries:
-            warning = (
-                f"{warning} Re-running the contract generation to cover them."
-            )
-            warnings.append(warning)
-            logger.warning(warning)
-            contract_prompt_suffix = (
-                f"\n\nPlease cover the following missing Acceptance Criteria: {', '.join(missing_ac)}."
-            )
-            retry_count += 1
-            continue
-        warnings.append(warning)
-        logger.warning(warning)
-        break
+    logger.info("... Generating API contract with coding model.")
+    contract_parsed = call_ollama_json(contract_system_prompt, contract_user_prompt, contract_schema)
 
     if not contract_parsed or not contract_parsed.get("schemas") or not contract_parsed.get("endpoints"):
         logger.error("... Failed to generate API contract from reasoning steps.")
         return json.dumps({
-            "detailed_steps": reasoning_steps,
+            "detailed_steps": detailed_steps,
             "schemas": [],
-            "endpoints": [],
-            "warnings": warnings,
+            "endpoints": []
         }, indent=2)
 
     # --- Step 3: Combine and return the full spec ---
     full_spec = {
-        "detailed_steps": reasoning_steps,
+        "reasoning_steps": detailed_steps,
         "schemas": contract_parsed["schemas"],
         "endpoints": contract_parsed["endpoints"],
-        "warnings": warnings,
     }
 
     return json.dumps(full_spec, indent=2)
@@ -1261,15 +983,6 @@ def run_spec_qa_review(
         "5. **Output JSON**: Your entire response must be in the specified JSON format.\n"
         "6. **Contract Requirements**: Fail the spec if it does not define the necessary schemas and endpoints to satisfy every Acceptance Criterion. The spec must be self-contained and sufficient for a developer to build a working demo."
     )
-    spec_contract = {}
-    try:
-        spec_contract = json.loads(spec_text) if spec_text else {}
-    except json.JSONDecodeError:
-        spec_contract = {}
-    spec_warnings = list(spec_contract.get("warnings") or [])
-    contract_ac_refs = collect_contract_ac_refs(spec_contract)
-    user_ac_set = extract_acceptance_criteria(user_stories)
-    missing_ac = sorted(user_ac_set - contract_ac_refs)
     user_prompt = f"""
     Product idea: {product_idea}
 
@@ -1279,32 +992,14 @@ def run_spec_qa_review(
     Architecture Spec to review:
     {spec_text or 'Unavailable.'}
 
-    {'Warnings from spec: ' + '; '.join(spec_warnings) if spec_warnings else 'Warnings from spec: None.'}
-
     Review the spec. Does it define the necessary schemas and endpoints to satisfy every Acceptance Criterion for a simple demo?
     """
     # Use the REASONING model for this logical review task.
     parsed = call_ollama_json(system_prompt, user_prompt, qa_schema, reasoning=True)
     if not parsed:
         return json.dumps({"verdict": "fail", "findings": [{"severity": "critical", "title": "QA Failure", "details": "Could not generate a structured QA response for the spec."}] }, indent=2)
-    verdict = parsed.get("verdict", "unknown")
+    lines = [f"## Verdict: {parsed.get('verdict', 'unknown')}"]
     findings = parsed.get("findings") or []
-    if missing_ac:
-        findings.append({
-            "severity": "critical",
-            "title": "Missing Acceptance Criteria",
-            "details": f"The spec lacks references to {', '.join(missing_ac)}."
-        })
-        verdict = "fail"
-    if spec_warnings:
-        findings.append({
-            "severity": "major",
-            "title": "Spec Warnings",
-            "details": "; ".join(spec_warnings)
-        })
-        if verdict != "fail":
-            verdict = "major"
-    lines = [f"## Verdict: {verdict}"]
     if findings:
         lines.append("## Findings:")
         for finding in findings:
@@ -1317,22 +1012,6 @@ def run_spec_qa_review(
         lines.append("## Recommendations:")
         for rec in recs:
             lines.append(f"- {rec}")
-    if findings and verdict != "fail":
-        verdict = "fail"
-    checklist: list[str] = []
-    if missing_ac:
-        checklist.append(f"AC coverage missing: {', '.join(missing_ac)}")
-    else:
-        checklist.append("AC coverage confirmed.")
-    if spec_warnings:
-        checklist.append("Demo constraints require attention.")
-    else:
-        checklist.append("Demo constraints appear satisfied.")
-    if checklist:
-        lines.append("## Checklist:")
-        for item in checklist:
-            lines.append(f"- {item}")
-    lines[0] = f"## Verdict: {verdict}"
     return "\n".join(lines).strip()
 
 def generate_engineering_code(
@@ -1341,20 +1020,6 @@ def generate_engineering_code(
     spec_contract: str | None,
 ) -> tuple[str, str]:
     implementation_plan = "# No implementation plan was generated."
-    contract_data = {}
-    try:
-        contract_data = json.loads(spec_contract) if spec_contract else {}
-    except json.JSONDecodeError:
-        logger.warning("Could not parse spec contract to JSON.")
-        contract_data = {}
-    spec_warnings = list(contract_data.get("warnings") or [])
-    user_ac_set = extract_acceptance_criteria(user_stories)
-    contract_ac_refs = collect_contract_ac_refs(contract_data)
-    missing_ac = sorted(user_ac_set - contract_ac_refs)
-    if missing_ac:
-        note = f"Contract missing coverage for ACs: {', '.join(missing_ac)}."
-        logger.warning(note)
-        spec_warnings.append(note)
     # --- Step 1: Generate implementation plan with the reasoning model ---
     plan_schema = {
         "type": "object",
@@ -1367,57 +1032,22 @@ def generate_engineering_code(
         "required": ["implementation_plan"]
     }
     plan_system_prompt = (
-        "You are a Senior Engineer specialized in coding algorithms and will create an implementation plan for a demo app.\n"
-        "Your task is to write detailed pseudo-code for each endpoint in the provided API spec.\n"
-        "RULES (demo-only):\n"
-        "1. Surface the core value prop using hardcoded users, in-memory data, and no production services—this is a short-lived demo.\n"
-        "2. For each endpoint, detail the logic: how to handle the request, what data to fetch from the in-memory `DB`, how to process it, and what to return.\n"
-        "3. Describe exactly how you will capture detailed event-level entries, persist them across sessions, aggregate them into counters or summaries, and represent any notification simulators mentioned in the spec so live counters and reminders feel functional for the single persona.\n"
-        "4. Show how notification simulators will queue reminders, toggle delivery state, or log retries so push behavior can be inspected without real providers.\n"
-        "5. Reference every relevant Acceptance Criterion within the steps (e.g., 'Step 2 (AC 1.2): ...').\n"
-        "6. Provide at least three numbered steps and explain how each step maps to the data models or endpoints.\n"
-        "7. Plan for an in-memory database (a Python dictionary `DB = {}`). Specify how you will structure and access data (e.g., `DB['users']`, `DB['sessions']`).\n"
-        "8. Simulate any security/privacy behavior: use mock tokens, encrypted blobs, or consent placeholders and never install real auth/encryption libraries."
+        "You are a Senior Engineer creating an implementation plan. Your task is to write detailed pseudo-code for each endpoint in the provided API spec.\n"
+        "RULES:\n"
+        "1. For each endpoint, detail the logic: how to handle the request, what data to fetch from the in-memory `DB`, how to process it, and what to return.\n"
+        "2. Plan for an in-memory database (a Python dictionary `DB = {}`). Specify how you will structure and access data (e.g., `DB['users']`, `DB['coupons']`).\n"
+        "3. Your plan must be a clear, step-by-step guide that another developer can use to write the final Python code."
     )
-    warnings_block = f"\n{format_warning_section(spec_warnings)}" if spec_warnings else ""
-    plan_base_prompt = f"""
+    plan_user_prompt = f"""
     Product Idea (for context): {product_idea}
     User Stories (for business logic context): {user_stories or 'N/A'}
     API Specification (source of truth):
     {spec_contract or 'Unavailable.'}
 
     Based on the API specification and user stories, provide a detailed implementation plan in pseudo-code.
-    {warnings_block}
     """
-    max_plan_retries = 2
-    plan_retry = 0
-    plan_prompt_suffix = ""
-    plan_parsed = None
-    implementation_plan = implementation_plan
-    while plan_retry <= max_plan_retries:
-        plan_user_prompt = plan_base_prompt + plan_prompt_suffix
-        attempt_num = plan_retry + 1
-        total_attempts = max_plan_retries + 1
-        logger.info(
-            "... Generating engineering implementation plan with reasoning model (attempt %d/%d).",
-            attempt_num,
-            total_attempts,
-        )
-        plan_parsed = call_ollama_json(plan_system_prompt, plan_user_prompt, plan_schema, reasoning=True)
-        if plan_parsed and plan_parsed.get("implementation_plan"):
-            implementation_plan = plan_parsed["implementation_plan"]
-            if _implementation_plan_sufficient(implementation_plan):
-                break
-            plan_prompt_suffix = (
-                "\nFollowing the previous attempt, expand the plan with at least three numbered steps, "
-                "referencing the relevant ACs and laying out the per-endpoint data flow."
-            )
-            plan_retry += 1
-            continue
-        break
-    if not plan_parsed or not plan_parsed.get("implementation_plan"):
-        logger.error("... Failed to generate implementation plan.")
-        return "main.py", "# Code generation failed: Could not create an implementation plan."
+    logger.info("... Generating engineering implementation plan with reasoning model.")
+    plan_parsed = call_ollama_json(plan_system_prompt, plan_user_prompt, plan_schema, reasoning=True)
 
     if not plan_parsed or not plan_parsed.get("implementation_plan"):
         logger.error("... Failed to generate implementation plan.")
@@ -1425,14 +1055,6 @@ def generate_engineering_code(
 
     implementation_plan = plan_parsed.get("implementation_plan", implementation_plan)
     logger.info("... Implementation plan generated successfully.")
-    plan_violations = detect_demo_constraint_violations([implementation_plan])
-    if plan_violations:
-        violation_note = (
-            "Implementation plan mentions forbidden demo features: "
-            f"{', '.join(sorted(set(plan_violations)))}."
-        )
-        logger.warning(violation_note)
-        spec_warnings.append(violation_note)
 
     # --- Step 2: Generate the final code with the coding model ---
     code_schema = {
@@ -1445,16 +1067,13 @@ def generate_engineering_code(
     }
     code_system_prompt = (
         "You are a Python developer. Your task is to translate the provided implementation plan and API spec into a single, runnable FastAPI file.\n"
-        "## RULES (demo-only):\n"
+        "## RULES:\n"
         "1. **Strict Adherence**: Follow the implementation plan and API spec *exactly*. Do not add any logic, endpoints, or models not present in the plan or spec.\n"
         "2. **Single File**: The entire application must be in one Python file.\n"
         "3. **In-Memory DB**: Use a simple dictionary `DB = {}` for storage as outlined in the plan.\n"
         "4. **Complete Code**: The code must be complete, runnable, and include all necessary imports (FastAPI, Pydantic, etc.) and a `uvicorn` runner block.\n"
-        "5. **Simulated Behavior**: Build the code so it stores granular event entries, computes counters or aggregates, and surfaces simulated notification behavior (e.g., queue reminders or toggle delivery flags) while keeping the demo tied to a fixed persona.\n"
-        "6. **Output Format**: Return only the raw JSON with `file_name` and `code`.\n"
-        "7. **Demo Constraints**: Honor the warnings from the spec, keep security behavior simulated, and avoid mentioning banned keywords (jwt, oauth, password_hash, persistent database, etc.)."
+        "5. **Output Format**: Return only the raw JSON with `file_name` and `code`."
     )
-    code_warnings_block = f"\n{format_warning_section(spec_warnings)}" if spec_warnings else ""
     code_user_prompt = f"""
     API Specification:
     {spec_contract or 'Unavailable.'}
@@ -1463,7 +1082,6 @@ def generate_engineering_code(
     {implementation_plan}
 
     Now, write the complete Python code for `main.py` based on the provided spec and plan.
-    {code_warnings_block}
     """
     logger.info("... Generating Python code from implementation plan with coding model.")
     code_parsed = call_ollama_json(code_system_prompt, code_user_prompt, code_schema)
@@ -1519,19 +1137,8 @@ def run_engineering_qa_review(
         "3. **Out of Scope**: You are FORBIDDEN from mentioning features or requirements from the 'Next Iteration Backlog' section of the user stories. Your review is for the MVP only.\n"
         "4. **Be Concise**: Keep findings brief and actionable. Keep the 'details' for each finding to one or two short sentences.\n"
         "5. **Output JSON**: Your entire response must be in the specified JSON format.\n"
-        "6. **Verify Business Logic**: Check that functions and endpoints contain a plausible, simple implementation of the business logic required by the user stories' acceptance criteria. Flag empty or placeholder logic as a 'critical' finding.\n"
-        "7. **Respect Warnings**: Honor any warnings from the spec, keep security behavior simulated, and do not mention banned keywords (jwt, oauth, password_hash, persistent database, etc.)."
+        "6. **Verify Business Logic**: Check that functions and endpoints contain a plausible, simple implementation of the business logic required by the user stories' acceptance criteria. Flag empty or placeholder logic as a 'critical' finding."
     )
-    contract_data = {}
-    try:
-        contract_data = json.loads(spec_contract) if spec_contract else {}
-    except json.JSONDecodeError:
-        contract_data = {}
-    spec_warnings = list(contract_data.get("warnings") or [])
-    contract_ac_refs = collect_contract_ac_refs(contract_data)
-    user_ac_set = extract_acceptance_criteria(user_stories)
-    missing_ac = sorted(user_ac_set - contract_ac_refs)
-    code_violations = detect_demo_constraint_violations([engineering_code or ""])
     user_prompt = f"""
     Product idea: {product_idea}
     User stories: {user_stories or 'Unavailable.'}
@@ -1539,37 +1146,12 @@ def run_engineering_qa_review(
 
     Prototype code to review:
     {engineering_code or 'Unavailable.'}
-    
-    {'Warnings from spec: ' + '; '.join(spec_warnings) if spec_warnings else 'Warnings from spec: None.'}
     """
     parsed = call_ollama_json(system_prompt, user_prompt, qa_schema, reasoning=True)
     if not parsed:
         return json.dumps({"verdict": "fail", "findings": [{"severity": "critical", "title": "QA Failure", "details": "Could not generate a structured QA response for the spec."}] }, indent=2)
-    verdict = parsed.get("verdict", "unknown")
+    lines = [f"## Verdict: {parsed.get('verdict', 'unknown')}"]
     findings = parsed.get("findings") or []
-    if missing_ac:
-        findings.append({
-            "severity": "critical",
-            "title": "Missing Acceptance Criteria",
-            "details": f"The spec/code lacks references to {', '.join(missing_ac)}."
-        })
-        verdict = "fail"
-    if spec_warnings:
-        findings.append({
-            "severity": "major",
-            "title": "Spec Warnings",
-            "details": "; ".join(spec_warnings)
-        })
-        if verdict != "fail":
-            verdict = "major"
-    if code_violations:
-        findings.append({
-            "severity": "major",
-            "title": "Demo Constraint Violations in Code",
-            "details": f"The code mentions: {', '.join(sorted(set(code_violations)))}."
-        })
-        verdict = "fail"
-    lines = [f"## Verdict: {verdict}"]
     if findings:
         lines.append("## Findings:")
         for finding in findings:
@@ -1582,23 +1164,6 @@ def run_engineering_qa_review(
         lines.append("## Recommendations:")
         for rec in recs:
             lines.append(f"- {rec}")
-    checklist: list[str] = []
-    if missing_ac:
-        checklist.append(f"AC coverage missing: {', '.join(missing_ac)}")
-    else:
-        checklist.append("AC coverage confirmed.")
-    if spec_warnings:
-        checklist.append("Demo spec warnings need attention.")
-    else:
-        checklist.append("Demo spec warnings cleared.")
-    if code_violations:
-        checklist.append("Code violates demo constraints.")
-    else:
-        checklist.append("Code respects demo constraints.")
-    if checklist:
-        lines.append("## Checklist:")
-        for item in checklist:
-            lines.append(f"- {item}")
     return "\n".join(lines).strip()
 
 def run_duckduckgo_research(product_idea: str) -> str:
@@ -1686,9 +1251,8 @@ def product_prd_node(state: AgentState):
 
 def product_stories_node(state: AgentState):
     logger.info(f"--- Node: product_stories_node (Task ID: {state['task_id']}) ---")
-    prd_without_rationale = strip_rationales(state.get('prd_summary'))
     state['user_stories'] = generate_user_stories(
-        state['product_idea'], prd_without_rationale
+        state['product_idea'], state.get('prd_summary')
     )
     state['status'] = "pending_story_approval"
     state['pending_approval_content'] = (
@@ -1731,11 +1295,7 @@ def engineering_spec_node(state: AgentState):
     if spec:
         try:
             full_spec = json.loads(spec)
-            contract_only = {
-                "schemas": full_spec.get("schemas", []),
-                "endpoints": full_spec.get("endpoints", []),
-                "warnings": full_spec.get("warnings", []),
-            }
+            contract_only = {"schemas": full_spec.get("schemas", []), "endpoints": full_spec.get("endpoints", [])}
             spec_contract = json.dumps(contract_only, indent=2)
         except (json.JSONDecodeError, TypeError):
             logger.warning("Could not parse engineering_spec to extract contract. Passing full spec.")
@@ -1758,7 +1318,17 @@ def engineering_spec_node(state: AgentState):
 def engineering_node(state: AgentState):
     logger.info(f"--- Node: engineering_node (Task ID: {state['task_id']}) ---")
 
-    # Pass the full engineering spec (including warnings) to downstream agents so they can honor constraints.
+    # Extract only the contract (schemas and endpoints) from the full spec.
+    # This gives the developer agent a clean, unambiguous source of truth.
+    # spec_contract = ""
+    # if state['engineering_spec']:
+    #     try:
+    #         full_spec = json.loads(state['engineering_spec'])
+    #         contract_only = {"schemas": full_spec.get("schemas", []), "endpoints": full_spec.get("endpoints", [])}
+    #         spec_contract = json.dumps(contract_only, indent=2)
+    #     except (json.JSONDecodeError, TypeError):
+    #         logger.warning("Could not parse engineering_spec to extract contract. Passing full spec.")
+    #         spec_contract = state['engineering_spec']
 
     file_name, code = generate_engineering_code(
         state['product_idea'],

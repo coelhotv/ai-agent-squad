@@ -256,7 +256,7 @@
 
         manualRefreshBtn.addEventListener('click', fetchTasks);
         fetchTasks();
-        setInterval(fetchTasks, 60000);
+        setInterval(fetchTasks, 120000);
         exportTasksBtn.addEventListener('click', () => {
             const link = document.createElement('a');
             link.href = `${API_BASE_URL}/tasks/export`;
