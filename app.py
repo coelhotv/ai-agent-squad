@@ -1034,7 +1034,7 @@ def generate_engineering_spec(
         "required": ["detailed_steps"],
     }
     reasoning_system_prompt = (
-        "You are a Senior Software Architect specializing in FastAPI, Pydantic v2, and uvicorn.\n"
+        "You are a Senior Solutions Architect specializing in FastAPI, Pydantic v2, and uvicorn.\n"
         "Your task is to create a step-by-step detailed plan for a **demo-only prototype API**. This is for a short-lived demo, not a production system.\n"
         "RULES:\n"
         "1. **MVP ONLY**: Your plan must ONLY address the user stories provided. IGNORE all backlog items, future features, or items not in the user stories. Low-fidelity wireframe is provided only for reference.\n"
@@ -1136,7 +1136,7 @@ def generate_engineering_spec(
         "required": ["schemas", "endpoints"],
     }
     contract_system_prompt = (
-        "You are a specialist API designer. Your job is to generate the JSON for API schemas and endpoints based *exactly* on the provided reasoning steps.\n"
+        "You are a specialist API contract engineer. Your job is to generate the JSON for API schemas and endpoints based *exactly* on the provided reasoning steps.\n"
         "RULES:\n"
         "1. Implement every step from the reasoning plan.\n"
         "2. Define all Pydantic v2 models in the `schemas` list.\n"
@@ -1367,7 +1367,7 @@ def generate_engineering_code(
         "required": ["implementation_plan"]
     }
     plan_system_prompt = (
-        "You are a Senior Engineer specialized in coding algorithms and will create an implementation plan for a demo app.\n"
+        "You are a Senior Engineer specialized in algorithm design and your job is to create an implementation plan for a demo app.\n"
         "Your task is to write detailed pseudo-code for each endpoint in the provided API spec.\n"
         "RULES (demo-only):\n"
         "1. Surface the core value prop using hardcoded users, in-memory data, and no production services—this is a short-lived demo.\n"
@@ -1444,7 +1444,7 @@ def generate_engineering_code(
         "required": ["file_name", "code"]
     }
     code_system_prompt = (
-        "You are a Python developer. Your task is to translate the provided implementation plan and API spec into a single, runnable FastAPI file.\n"
+        "You are an experienced Software Engineer specialized in Python coding. Your task is to translate the provided implementation plan and API spec into a single, runnable FastAPI file for a demo-only app.\n"
         "## RULES (demo-only):\n"
         "1. **Strict Adherence**: Follow the implementation plan and API spec *exactly*. Do not add any logic, endpoints, or models not present in the plan or spec.\n"
         "2. **Single File**: The entire application must be in one Python file.\n"
