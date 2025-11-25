@@ -527,7 +527,7 @@
                 </details>
                 <div class="ux-card">
                     <h3>UX Artifacts</h3>
-                    <p>Preview Mermaid flows and Tailwind wireframes inside a new browser tab.</p>
+                    <p>Preview user flows and Tailwind wireframes inside a new browser tab.</p>
                     <div class="ux-actions">
                         <button type="button" id="view-flow-btn" disabled>View Flow Diagram</button>
                         <button type="button" id="view-wireframe-btn" class="secondary" disabled>View Wireframe</button>
@@ -604,11 +604,8 @@
             </div>
         </div>
     </div>
-    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@9/dist/mermaid.min.js"></script>
     <script>
-        if (window.mermaid) {
-            window.mermaid.initialize({ startOnLoad: false, securityLevel: "strict", theme: "neutral" });
-        }
         const API_BASE_URL = window.location.origin;
         const ideaForm = document.getElementById('idea-form');
         const productIdeaTextarea = document.getElementById('product-idea');
@@ -671,7 +668,7 @@
             engineering_qa: engineeringQaContent,
         };
         let storedFlowDiagram = null;
-        let storedWireframeHtml = null;
+        let storedWireframeArtifact = null;
 
         const workflowSteps = [
             { key: 'starting', label: 'Intake', description: 'Idea capture' },
@@ -742,6 +739,10 @@
                     .querySelectorAll(`.edit-btn[data-artifact="${name}"]`)
                     .forEach(btn => (btn.disabled = true));
             });
+        }
+
+        if (window.mermaid) {
+            window.mermaid.initialize({ startOnLoad: false, securityLevel: "strict", theme: "neutral" });
         }
 
         function renderWorkflow(activeStatus) {
@@ -854,22 +855,6 @@
             setFormEnabled(true);
         }
 
-        async function checkPendingApprovalOnLoad() {
-            try {
-                const response = await fetch(`${API_BASE_URL}/get_pending_approval`);
-                if (!response.ok) return;
-                const data = await response.json();
-                if (data && data.task_id) {
-                    markPendingTask(data);
-                    showMessage('Resuming pending approval.');
-                } else {
-                    clearPendingTask();
-                }
-            } catch (error) {
-                console.error('Pending load error:', error);
-            }
-        }
-
         function clearArtifacts() {
             renderArtifact(researchContent, null);
             renderArtifact(prdContent, null);
@@ -936,7 +921,7 @@
             ideaForm.querySelectorAll('button').forEach(btn => btn.disabled = state);
         }
 
-        async function pollForApprovals() {
+        async function pollForApprovals(options = {}) {
             try {
                 const response = await fetch(`${API_BASE_URL}/get_pending_approval`);
                 if (!response.ok) return;
@@ -950,12 +935,13 @@
                         return;
                     }
                     currentTaskId = data.task_id;
-                    approvalContent.textContent = data.pending_approval_content || 'Pending your review.';
-                    approvalSection.classList.remove('hidden');
-                    updateArtifactsFromTask(data);
-                    updateCurrentStage(data.status);
+                    markPendingTask(data);
+                    if (options.announceResuming) {
+                        showMessage('Resuming pending approval.');
+                    }
                     stopPolling();
                 } else {
+                    clearPendingTask();
                     approvalSection.classList.add('hidden');
                 }
             } catch (error) {
@@ -963,8 +949,88 @@
             }
         }
 
+        function initializePendingApprovalResume() {
+            const startResume = () => pollForApprovals({ announceResuming: true });
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', startResume, { once: true });
+            } else {
+                startResume();
+            }
+        }
+
         function renderArtifact(element, text) {
             element.textContent = text?.trim() || 'No content yet.';
+        }
+
+        function parseFlowJson(flowText) {
+            if (!flowText) return null;
+            try {
+                return JSON.parse(flowText);
+            } catch {
+                return null;
+            }
+        }
+
+        function decodeEscapedText(value) {
+            if (!value) return value;
+            return value
+                .replace(/\\n/g, '\n')
+                .replace(/\\r/g, '\r')
+                .replace(/\\t/g, '\t')
+                .replace(/\\"/g, '"')
+                .replace(/\\'/g, "'")
+                .replace(/\\\\/g, '\\');
+        }
+
+        function getFlowNodes(flowText) {
+            const parsed = parseFlowJson(flowText);
+            if (!parsed) return [];
+            if (Array.isArray(parsed.nodes) && parsed.nodes.length) {
+                return parsed.nodes;
+            }
+            if (Array.isArray(parsed.nodes_list) && parsed.nodes_list.length) {
+                return parsed.nodes_list.map((label, index) => ({
+                    id: `node_${index + 1}`,
+                    label,
+                }));
+            }
+            return [];
+        }
+
+        function getFlowEdges(flowText) {
+            const parsed = parseFlowJson(flowText);
+            if (!parsed) return [];
+            if (Array.isArray(parsed.edges) && parsed.edges.length) {
+                return parsed.edges;
+            }
+            const mermaid = parsed.mermaid_syntax || flowText || '';
+            const regex = /([A-Za-z0-9_]+)(?:\[[^\]]*\])?\s*(?:--\|([^|]*)\|>|-->|->|\|>)\s*([A-Za-z0-9_]+)/g;
+            const edges = [];
+            let match;
+            while ((match = regex.exec(mermaid))) {
+                edges.push({
+                    source: match[1],
+                    target: match[3],
+                    label: (match[2] || '').trim(),
+                });
+            }
+            return edges;
+        }
+        function parseWireframeArtifact(artifact) {
+            if (!artifact) return null;
+            try {
+                return JSON.parse(artifact);
+            } catch {
+                return null;
+            }
+        }
+
+        function getWireframeHtmlFromArtifact(artifact) {
+            const parsed = parseWireframeArtifact(artifact);
+            if (parsed && typeof parsed.html_content === 'string') {
+                return decodeEscapedText(parsed.html_content).trim();
+            }
+            return decodeEscapedText(artifact?.trim() || '');
         }
 
         function extractReasoningDisplay(field, raw) {
@@ -988,16 +1054,22 @@
 
         function renderFlowDiagram(diagramText) {
             storedFlowDiagram = diagramText?.trim() || null;
-            viewFlowBtn.disabled = !storedFlowDiagram;
+            const nodes = getFlowNodes(storedFlowDiagram);
+            viewFlowBtn.disabled = nodes.length === 0;
             const flowStatusEl = document.getElementById('flow-status');
-            if (flowStatusEl) flowStatusEl.textContent = storedFlowDiagram ? 'Diagram ready for review' : 'No diagram yet.';
+            if (flowStatusEl) {
+                flowStatusEl.textContent = nodes.length
+                    ? `Flow ready with ${nodes.length} nodes`
+                    : 'No diagram yet.';
+            }
         }
 
         function renderWireframe(htmlText) {
-            storedWireframeHtml = htmlText?.trim() || null;
-            viewWireframeBtn.disabled = !storedWireframeHtml;
+            storedWireframeArtifact = htmlText?.trim() || null;
+            const htmlContent = getWireframeHtmlFromArtifact(storedWireframeArtifact);
+            viewWireframeBtn.disabled = !htmlContent;
             const wireframeStatusEl = document.getElementById('wireframe-status');
-            if (wireframeStatusEl) wireframeStatusEl.textContent = storedWireframeHtml ? 'Wireframe ready for review' : 'No wireframe yet.';
+            if (wireframeStatusEl) wireframeStatusEl.textContent = htmlContent ? 'Wireframe ready for review' : 'No wireframe yet.';
         }
 
         function renderEngineeringPrototype(fileName, codeText) {
@@ -1031,7 +1103,7 @@
             if (artifact === 'user_flow_diagram') {
                 overlayText.value = storedFlowDiagram || '';
             } else if (artifact === 'wireframe_html') {
-                overlayText.value = storedWireframeHtml || '';
+                overlayText.value = storedWireframeArtifact || '';
             } else if (reasoningFields[artifact]) {
                 overlayText.value = extractReasoningDisplay(artifact, artifactDisplays[artifact].textContent) || '';
             } else {
@@ -1085,72 +1157,123 @@
                 closeOverlay();
             }
         }
-
+    </script>
+    <script>
         function openFlowInNewTab() {
-            if (!storedFlowDiagram) {
+            const nodes = getFlowNodes(storedFlowDiagram);
+            const edges = getFlowEdges(storedFlowDiagram);
+            if (!nodes.length) {
                 alert('No diagram available yet.');
                 return;
             }
-            const safeScriptFlow = storedFlowDiagram
-                .replace(/\\/g, '\\\\')
-                .replace(/`/g, '\\`');
-            const safeHtmlFlow = storedFlowDiagram
-                .replace(/</g, '&lt;')
-                .replace(/>/g, '&gt;');
-            const template = `
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <title>User Flow Diagram</title>
-  <script type="module">
-    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
-    mermaid.initialize({ startOnLoad: true, securityLevel: 'strict', theme: 'neutral' });
-    window.addEventListener('DOMContentLoaded', () => {
-      const target = document.querySelector('#diagram');
-      target.textContent = \`${safeScriptFlow}\`;
-    });
-  <\/script>
-  <style>
-    body { margin: 0; font-family: system-ui, sans-serif; background: #f8fafc; padding: 2rem; }
-    #diagram { font-size: 1rem; }
-  </style>
-</head>
-<body>
-  <div id="diagram" class="mermaid">${safeHtmlFlow}</div>
-</body>
-</html>`;
+            const nodesJson = JSON.stringify(nodes).replace(/<\/script>/gi, '<\\/script>');
+            const edgesJson = JSON.stringify(edges).replace(/<\/script>/gi, '<\\/script>');
+const flowScript = `
+const nodesData = ${nodesJson};
+const edgesData = ${edgesJson};
+function renderFlowDiagram() {
+  const graph = new dagre.graphlib.Graph();
+  graph.setGraph({ rankdir: 'LR', nodesep: 24, ranksep: 40 });
+  graph.setDefaultEdgeLabel(() => ({}));
+  nodesData.forEach(node => graph.setNode(node.id, { label: node.label, width: 160, height: 60 }));
+  edgesData.forEach(edge => graph.setEdge(edge.source, edge.target, { label: edge.label || '' }));
+  dagre.layout(graph);
+  const svg = document.getElementById('flow-svg');
+  const nodeContainer = document.getElementById('flow-nodes');
+  const padding = 40;
+  const nodeModels = graph.nodes().map(id => graph.node(id));
+  const minX = Math.min(...nodeModels.map(node => node.x - node.width / 2));
+  const minY = Math.min(...nodeModels.map(node => node.y - node.height / 2));
+  const maxX = Math.max(...nodeModels.map(node => node.x + node.width / 2));
+  const maxY = Math.max(...nodeModels.map(node => node.y + node.height / 2));
+  const offsetX = padding - minX;
+  const offsetY = padding - minY;
+  const width = maxX - minX + padding * 2;
+  const height = maxY - minY + padding * 2;
+  svg.setAttribute('width', width);
+  svg.setAttribute('height', height);
+  nodeContainer.style.width = width + 'px';
+  nodeContainer.style.height = height + 'px';
+  graph.nodes().forEach(id => {
+    const n = graph.node(id);
+    const el = document.createElement('div');
+    el.className = 'flow-node';
+    el.style.left = (n.x - n.width / 2 + offsetX) + 'px';
+    el.style.top = (n.y - n.height / 2 + offsetY) + 'px';
+    el.textContent = n.label;
+    nodeContainer.appendChild(el);
+  });
+  const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+  const arrowMarker = document.createElementNS('http://www.w3.org/2000/svg', 'marker');
+  arrowMarker.setAttribute('id', 'arrow');
+  arrowMarker.setAttribute('viewBox', '0 0 10 10');
+  arrowMarker.setAttribute('refX', '5');
+  arrowMarker.setAttribute('refY', '5');
+  arrowMarker.setAttribute('markerUnits', 'strokeWidth');
+  arrowMarker.setAttribute('markerWidth', '6');
+  arrowMarker.setAttribute('markerHeight', '6');
+  arrowMarker.setAttribute('orient', 'auto');
+  const arrowPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  arrowPath.setAttribute('d', 'M 0 0 L 10 5 L 0 10 z');
+  arrowPath.setAttribute('fill', '#2563eb');
+  arrowMarker.appendChild(arrowPath);
+  defs.appendChild(arrowMarker);
+  svg.appendChild(defs);
+  const arrowShift = { x: 27, y: 32 };
+  graph.edges().forEach(e => {
+    const edgeObj = graph.edge(e);
+    const points = edgeObj.points;
+    if (!points || points.length < 2) return;
+    let d = 'M' + (points[0].x + offsetX + arrowShift.x) + ',' + (points[0].y + offsetY + arrowShift.y);
+    for (let i = 1; i < points.length; i++) {
+      d += ' L' + (points[i].x + offsetX + arrowShift.x) + ',' + (points[i].y + offsetY + arrowShift.y);
+    }
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', d);
+    path.setAttribute('stroke', '#2563eb');
+    path.setAttribute('stroke-width', '2');
+    path.setAttribute('fill', 'none');
+    path.setAttribute('marker-end', 'url(#arrow)');
+    svg.appendChild(path);
+  });
+}
+function waitForFlowRender() {
+  if (typeof window.dagre === 'undefined') {
+    setTimeout(waitForFlowRender, 50);
+    return;
+  }
+  renderFlowDiagram();
+}
+if (document.readyState === 'complete') {
+  waitForFlowRender();
+} else {
+  window.addEventListener('DOMContentLoaded', waitForFlowRender);
+}
+`;
             const newWindow = window.open('', '_blank');
-            if (newWindow) {
-                newWindow.document.write(template);
+            if (!newWindow) {
+                alert('Unable to open new window.');
+                return;
             }
+            const html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8" /><title>User Flow Diagram</title><meta name="viewport" content="width=device-width, initial-scale=1" /><script src="https://cdn.jsdelivr.net/npm/dagre@0.8.5/dist/dagre.min.js"><\/script><style>body{margin:0;font-family:Inter,system-ui,sans-serif;background:#0f172a;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:2rem;} .flow-canvas{position:relative;width:min(1200px,100%);max-width:1200px;background:white;border-radius:24px;padding:2rem;box-shadow:0 35px 70px rgba(15,23,42,0.25);overflow:hidden;} #flow-nodes{position:relative;} .flow-node{position:absolute;width:160px;height:60px;background:#ecf0ff;border-radius:14px;border:1px solid #c7d2fe;display:flex;align-items:center;justify-content:center;font-weight:600;text-align: center;box-shadow:0 12px 20px rgba(15,23,42,0.15);} #flow-svg{position:absolute;inset:0;overflow:visible;pointer-events:none;}</style></head><body><div class="flow-canvas"><svg id="flow-svg"></svg><div id="flow-nodes"></div></div><script>${flowScript}<\/script></body></html>`;
+            newWindow.document.write(html);
+            newWindow.document.close();
         }
-
         function openWireframeInNewTab() {
-            if (!storedWireframeHtml) {
+            const htmlContent = getWireframeHtmlFromArtifact(storedWireframeArtifact);
+            if (!htmlContent) {
                 alert('No wireframe available yet.');
                 return;
             }
-            const template = `
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <title>Wireframe Preview</title>
-  <script src="https://cdn.tailwindcss.com"><\/script>
-  <style>body{margin:0;background:#0f172a;font-family:Inter,system-ui,sans-serif;padding:2rem;}</style>
-</head>
-<body>
-${storedWireframeHtml}
-</body>
-</html>`;
             const newWindow = window.open('', '_blank');
-            if (newWindow) {
-                newWindow.document.write(template);
+            if (!newWindow) {
+                alert('Unable to open new window.');
+                return;
             }
+            const html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8" /><title>Wireframe Preview</title><script src="https://cdn.tailwindcss.com"><\/script><style>body{margin:0;background:#0f172a;font-family:Inter,system-ui,sans-serif;padding:2rem;} .wireframe-root{max-width:1200px;margin:0 auto;}</style></head><body><div class="wireframe-root">${htmlContent}</div></body></html>`;
+            newWindow.document.write(html);
         }
-
-        function startPolling() {
+function startPolling() {
             if (pollingIntervalId) return;
             showMessage('Waiting for the next approval to become available...');
             pollingIntervalId = setInterval(pollForApprovals, 4000);
@@ -1255,9 +1378,9 @@ ${storedWireframeHtml}
         overlaySave.addEventListener('click', saveOverlay);
 
         setupCollapsibleWorkflow();
-        checkPendingApprovalOnLoad();
+        initializePendingApprovalResume();
         renderWorkflow(currentStatus);
         updateCurrentStage(currentStatus);
-    </script>
+  </script>
 </body>
 </html>

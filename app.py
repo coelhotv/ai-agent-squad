@@ -37,6 +37,7 @@ from sqlalchemy.ext.declarative import declarative_base
 # --- Research Imports ---
 from ddgs import DDGS
 import httpx
+
 # --- Logging Setup ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -83,6 +84,7 @@ def ensure_column(column_name: str):
         with engine.connect() as conn:
             conn.execute(text(f"ALTER TABLE tasks ADD COLUMN {column_name} TEXT"))
 
+
 for col_name in (
     "research_summary",
     "prd_summary",
@@ -101,12 +103,14 @@ for col_name in (
 ):
     ensure_column(col_name)
 
+
 def get_db():
     db = SessionLocal()
     try:
         yield db
     finally:
         db.close()
+
 
 # --- LangGraph State and Checkpointer ---
 class AgentState(TypedDict):
@@ -127,6 +131,7 @@ class AgentState(TypedDict):
     engineering_code: Optional[str]
     engineering_qa: Optional[str]
     last_rejected_step: Optional[str]
+
 
 # Keep the async connection open for the lifetime of the app and close on shutdown.
 _checkpointer_stack = AsyncExitStack()
@@ -176,7 +181,6 @@ def log_environment_status():
             logger.info("Successfully reached Ollama endpoint (%s).", f"{OLLAMA_BASE_URL}api/ps")
     except Exception as exc:
         logger.warning("Unable to reach Ollama at %s: %s", OLLAMA_BASE_URL, exc)
-
 
 
 def call_perplexity_json(
@@ -681,121 +685,172 @@ def fallback_user_stories(product_idea: str) -> str:
     )
 
 
+def normalize_mermaid_labels(flow: str) -> str:
+    """Normalize Mermaid edges to the `--|Label|` form so Mermaid v10 renders them."""
+    import re
+
+    def replace_missing_pipes(match):
+        label = match.group("label").strip()
+        return f"--|{label}| "
+
+    def replace_full(match):
+        label = match.group("label").strip()
+        return f"--|{label}|"
+
+    # Convert `-- Yes --` to `--|Yes|`.
+    flow = re.sub(r"--\s*(?P<label>[^-|]+?)\s*--", replace_full, flow)
+    # Convert `-- Yes|` (missing leading pipe) to `--|Yes|`.
+    flow = re.sub(r"--\s*(?P<label>[^|]+?)\|\s*", replace_missing_pipes, flow)
+    return flow
+
+
 def generate_user_flow_diagram(product_idea: str, user_stories: str | None) -> str:
-    mermaid_schema = {
+    flow_schema = {
         "type": "object",
         "properties": {
-            "title": {"type": "string"},
-            "nodes_list": {
+            "nodes": {
                 "type": "array",
                 "minItems": 4,
                 "maxItems": 6,
                 "items": {
-                    "type": "string",
-                    "description": "Unique ID or label for the node"
+                    "type": "object",
+                    "properties": {
+                        "id": {"type": "string", "pattern": "^[A-Za-z0-9_-]+$"},
+                        "label": {"type": "string"},
+                    },
+                    "required": ["id", "label"],
                 },
-                "description": "List exactly 4 to 6 distinct steps/nodes for the diagram."
+                "description": "List 4-6 unique nodes representing the flow."
+            },
+            "edges": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "source": {"type": "string"},
+                        "target": {"type": "string"},
+                        "label": {"type": "string"},
+                    },
+                    "required": ["source", "target"],
+                },
+                "description": "Edges between node IDs; labels are optional but helpful."
             },
             "mermaid_syntax": {
                 "type": "string",
-                "description": "The Mermaid code. It must ONLY use the nodes defined in 'nodes_list'."
+                "description": "Optional Mermaid definition mirroring the nodes and edges."
             }
         },
-        "required": ["title", "nodes_list", "mermaid_syntax"]
-    }    
+        "required": ["nodes", "edges", "mermaid_syntax"]
+    }
     system_prompt = (
-        "You are an expert UX Architect. Your goal is to create a clear, logical MermaidJS user flow diagram "
-        "based on the provided product idea, its estabished **user stories and acceptance criterias**. "
-        "For this MVP release, you must **IGNORE** the login/registration flows and just focus on the 2 first stories/ac."
-        "Output a JSON object that adheres strictly to the provided schema."
+        "You are an expert UX Architect. Produce a compact Mermaid flow plus structured node/edge data "
+        "that represents the core journey described by the user stories and acceptance criteria.\n"
+        "Focus on the MVP path (no login/onboarding) and keep labels short."
     )
     user_prompt = f"""
-        Idea: {product_idea}.
-        User stories:
-        {user_stories or 'Unavailable.'}
-        ### GUIDELINES:
-         1. **Node Count:**
-         - Plan exactly 4 to 6 steps. No more, no less.
-         - Use the 'nodes_list' field in the JSON to plan these steps first.
-         2. **Node Types:**
-         - Use standard rectangular nodes `[ ]` for User Actions (e.g., `A[User clicks Login]`).
-         - If needed, use diamond nodes `{{ }}` for System Decisions or logic checks (e.g., `B{{ Is Valid? }}`).
-         - Ensure the flow has a clear Start and End that commits to the core product idea.
-         3. **MermaidJS Syntax Rules:**
-         - Use simple, alphanumeric IDs for nodes (e.g., `Step1`, `Step2`). Do NOT use spaces in IDs.
-         - Put the descriptive text inside the brackets/parentheses.
-         - Example: `Start[User Opens App] --> Check{{ Logged In? }}`.
-         - Orientation: Defaults to `graph TD` (Top-Down).
-         4. **Content Quality:**
-         - Keep labels concise (2-5 words).
+    Idea: {product_idea}.
+    User stories:
+    {user_stories or 'Unavailable.'}
+
+    ### GUIDELINES:
+     1. Define 4-6 nodes with clean alphanumeric IDs and human-readable labels.
+     2. Connect those nodes with edges; include short edge labels when it clarifies transitions.
+     3. Mirror this structure in the Mermaid `mermaid_syntax` string (`graph TD` with `A[Label]` style).
+     4. Keep every ID/label consistent between the JSON and Mermaid output.
     """
-    parsed = call_ollama_json(system_prompt, user_prompt, mermaid_schema)
-    if parsed and parsed.get("mermaid_syntax"):
-        return parsed["mermaid_syntax"]
+    parsed = call_ollama_json(system_prompt, user_prompt, flow_schema)
+    if parsed and isinstance(parsed, dict) and parsed.get("edges"):
+        if parsed.get("mermaid_syntax"):
+            parsed["mermaid_syntax"] = normalize_mermaid_labels(parsed["mermaid_syntax"])
+        return json.dumps(parsed, indent=2)
     return fallback_user_flow_diagram(product_idea)
 
 
 def fallback_user_flow_diagram(product_idea: str) -> str:
-    return (
-        "flowchart TD\n"
-        "  Awareness[User hears about product] --> Landing[Visit idea page]\n"
-        "  Landing --> Evaluate{Fits need?}\n"
-        "  Evaluate -- yes --> Submit[Submit pilot request]\n"
-        "  Evaluate -- no --> Collect[Collect feedback]\n"
-        "  Submit --> Squad[Squad reviews request]\n"
-        "  Squad --> Onboard[Onboard + kickoff]\n"
-        f"  Onboard --> Value[Experience '{product_idea}' value]\n"
-    )
+    fallback = {
+        "title": f"{product_idea} Flow",
+        "nodes": [
+            {"id": "Start", "label": "Start"},
+            {"id": "Input", "label": "Input Data"},
+            {"id": "Review", "label": "Review Data"},
+            {"id": "Insights", "label": "View Insights"},
+            {"id": "End", "label": "End"},
+        ],
+        "nodes_list": [
+            "Start",
+            "Input",
+            "Review",
+            "Insights",
+            "End"
+        ],
+        "mermaid_syntax": (
+            "graph TD\n"
+            "  Start[Open App] --> Input[Add Cycle]\n"
+            "  Input --> Review{Review Data?}\n"
+            "  Review --|Yes| Insights[View Insights]\n"
+            "  Review --|No| End[Exit]\n"
+        )
+    }
+    fallback["edges"] = [
+        {"source": "Start", "target": "Input", "label": "Enter Data"},
+        {"source": "Input", "target": "Review", "label": "Review"},
+        {"source": "Review", "target": "Insights", "label": "Yes"},
+        {"source": "Review", "target": "End", "label": "No"},
+    ]
+    fallback["mermaid_syntax"] = normalize_mermaid_labels(fallback["mermaid_syntax"])
+    return json.dumps(fallback, indent=2)
 
 
 def generate_wireframe_html(product_idea: str, user_stories: str | None, flow_diagram: str | None) -> str:
     wireframe_schema = {
         "type": "object",
         "properties": {
+            "reasoning": {
+                "type": "string",
+                "description": "Short explanation of how the wireframe satisfies the user stories and flow."
+            },
             "html_content": {
                 "type": "string",
-                "description": "The raw HTML elements. Do NOT include <html>, <head>, or <body> tags. Just the <div> structures."
+                "description": "The raw HTML elements. Do NOT include <html>, <head>, or <body> tags."
             }
         },
-        "required": ["html_content"]
-    }    
+        "required": ["reasoning", "html_content"]
+    }
     system_prompt = (
         "You are a Senior UI/UX Prototyper. Your goal is to create a low-fidelity wireframe writing HTML and Tailwind CSS code. "
-        "It should deliver the core experience of the product within the low-fi wireframe."
-        "You should use the provided product idea, its user stories + acceptance criterias, and userflow as input. "
-        "Think in terms of reusable components like headers, cards, and sections."
+        "Deliver the core experience of the MVP product (first user story) inside a low-fi wireframe. "
+        "Document your reasoning before emitting the HTML so reviewers understand how the layout maps to the stories."
+        "You must use the provided product idea, its user stories + acceptance criteria, and the user flow as input."
     )
     user_prompt = f"""
         Idea: {product_idea}.
-        
+
         User stories:
         {user_stories or 'Unavailable.'}
 
-        User flow (Mermaid):
+        Mermaid user flow:
         {flow_diagram or 'Unavailable.'}
 
         ## DESIGN RULES:
-        ### **Aesthetic:** Stick to a low-fidelity wireframe design. 
-        - Use 'grayscale' style when possible, but **be mindful of 'dark' mode** on selected systems setups.
-        - Guarantee high contrast for readability (e.g., `bg-slate-900`, `text-slate-100`).
-        - Use borders (`border`, `border-gray-300`) to define areas.
+        - Keep the layout low-fidelity, grayscale/light contrast, and mindful of dark mode.
+        - Favor standard components: headers, cards, input sections, and placeholder charts.
+        - Avoid external images—use styled div placeholders instead.
+        - Use Tailwind utility classes for spacing, typography (`font-bold` for headers), and readability.
 
-        ###. **Images:** Do NOT use <img> tags requiring external URLs.
-        - Instead, use placeholder divs: `<div class="w-full h-48 bg-gray-300 flex items-center justify-center">Image Placeholder</div>`
-
-        ### **Typography:** Use standard sans-serif. Use `font-bold` for headers.
-
-        **Output:** - Provide ONLY the HTML structure (divs, sections, columns) aligned with the user flow and user stories.
-        - Do not write the <!DOCTYPE> or <body> tags; just the content inside.
+        **Output:**
+        1. First provide a short reasoning note that ties the layout back to the user stories and flow.
+        2. Then output the HTML structure using only divs/sections aligned with the flow.
+        3. Do not include <html>, <head>, or <body> tags.
+        4. Return the JSON object (reasoning + html_content) only.
     """
-    parsed = call_ollama_json(system_prompt, user_prompt, wireframe_schema)
-    if parsed and parsed.get("html_content"):
-        return parsed["html_content"]
+    parsed = call_ollama_json(system_prompt, user_prompt, wireframe_schema, reasoning=True)
+    if parsed and isinstance(parsed, dict) and parsed.get("html_content"):
+        return json.dumps(parsed, indent=2)
     return fallback_wireframe_html(product_idea)
 
 
 def fallback_wireframe_html(product_idea: str) -> str:
-    return (
+    content = (
         "<div class=\"min-h-screen bg-slate-900 text-slate-100 p-8\">\n"
         "  <header class=\"max-w-4xl mx-auto bg-slate-800 px-6 py-4 rounded-2xl\">\n"
         f"    <p class=\"text-sm uppercase tracking-widest text-slate-400\">Concept</p>\n"
@@ -803,23 +858,29 @@ def fallback_wireframe_html(product_idea: str) -> str:
         "  </header>\n"
         "  <main class=\"max-w-4xl mx-auto mt-6 grid gap-4 md:grid-cols-2\">\n"
         "    <section class=\"bg-slate-800 rounded-2xl p-4\">\n"
-        "      <h2 class=\"text-lg font-medium mb-2\">Key Journey</h2>\n"
-        "      <ul class=\"space-y-2 text-sm\">\n"
-        "        <li class=\"flex items-start gap-2\"><span class=\"mt-1 h-2 w-2 rounded-full bg-emerald-400\"></span>Discover opportunity</li>\n"
-        "        <li class=\"flex items-start gap-2\"><span class=\"mt-1 h-2 w-2 rounded-full bg-emerald-400\"></span>Submit pilot request</li>\n"
-        "        <li class=\"flex items-start gap-2\"><span class=\"mt-1 h-2 w-2 rounded-full bg-emerald-400\"></span>Track deliverables</li>\n"
-        "      </ul>\n"
+        "      <h2 class=\"text-lg font-medium mb-2\">Logging</h2>\n"
+        "      <form class=\"space-y-4\">\n"
+        "        <div>\n"
+        "          <label class=\"text-sm text-slate-300\" for=\"cigarettes\">Cigarettes smoked</label>\n"
+        "          <input id=\"cigarettes\" type=\"number\" class=\"w-full mt-1 rounded-xl px-3 py-2 bg-slate-900 border border-gray-700\" />\n"
+        "        </div>\n"
+        "        <button class=\"w-full rounded-xl bg-emerald-500 px-4 py-2\">Save Entry</button>\n"
+        "      </form>\n"
         "    </section>\n"
         "    <section class=\"bg-slate-800 rounded-2xl p-4\">\n"
-        "      <h2 class=\"text-lg font-medium mb-2\">Actions</h2>\n"
-        "      <div class=\"space-y-3\">\n"
-        "        <button class=\"w-full rounded-xl bg-emerald-500/20 px-4 py-3 text-left\">Start Task</button>\n"
-        "        <button class=\"w-full rounded-xl bg-slate-700 px-4 py-3 text-left\">Review Tasks</button>\n"
+        "      <h2 class=\"text-lg font-medium mb-2\">Insights</h2>\n"
+        "      <div class=\"h-48 bg-slate-900 rounded-xl border border-gray-700 flex items-center justify-center\">\n"
+        "        <span class=\"text-sm text-slate-400\">Chart placeholder</span>\n"
         "      </div>\n"
         "    </section>\n"
         "  </main>\n"
         "</div>\n"
     )
+    fallback = {
+        "reasoning": "Fallback layout covers logging and insight display with clear hierarchy.",
+        "html_content": content
+    }
+    return json.dumps(fallback, indent=2)
 
 
 DEMO_BANNED_KEYWORDS = (
@@ -1160,7 +1221,7 @@ def generate_engineering_spec(
 
     {'Previous attempt QA feedback: ' + qa_feedback if qa_feedback else ''}
     
-    Now, generate the `schemas` and `endpoints` JSON based on this plan.
+    Now, generate the `schemas` and `endpoints` JSON based on this plan (reasoning steps).
     Each schema and endpoint must list the specific Acceptance Criteria it covers via the `ac_refs` field.
     """
     contract_prompt_suffix = ""
@@ -1263,7 +1324,7 @@ def run_spec_qa_review(
         "RULES:\n"
         "1. **Focus on ACs**: A 'critical' finding is ONLY when an acceptance criterion is impossible to meet with the given spec (e.g., a required field is missing from a schema).\n"
         "2. **Ignore Production Concerns**: DO NOT fail the spec for missing `UPDATE`/`DELETE` endpoints, lack of authentication, or other production-level features. These are out of scope for a demo.\n"
-        "3. **Be Actionable**: Findings must point to a specific missing or incorrect part of the spec.\n"
+        "3. **Be Actionable**: Findings must point to a specific missing or incorrect part of the spec. Refer to the schemas/endpoints arrays when justifying each AC.\n"
         "4. **Be Concise**: Keep the 'details' for each finding to one or two short sentences.\n"
         "5. **Output JSON**: Your entire response must be in the specified JSON format.\n"
         "6. **Contract Requirements**: Fail the spec if it does not define the necessary schemas and endpoints to satisfy every Acceptance Criterion. The spec must be self-contained and sufficient for a developer to build a working demo."
@@ -1279,16 +1340,14 @@ def run_spec_qa_review(
     missing_ac = sorted(user_ac_set - contract_ac_refs)
     user_prompt = f"""
     Product idea: {product_idea}
-
     User stories: 
     {user_stories or 'Unavailable.'}
-
     Architecture Spec to review:
     {spec_text or 'Unavailable.'}
 
     {'Warnings from spec: ' + '; '.join(spec_warnings) if spec_warnings else 'Warnings from spec: None.'}
 
-    Review the spec. Does it define the necessary schemas and endpoints to satisfy every Acceptance Criterion for a simple demo?
+    Strictly review **the spec**. Does it define the necessary schemas and endpoints to satisfy every Acceptance Criterion for a simple demo?
     """
     # Use the REASONING model for this logical review task.
     parsed = call_ollama_json(system_prompt, user_prompt, qa_schema, reasoning=True)
@@ -1802,7 +1861,7 @@ def engineering_code_reasoning_node(state: AgentState):
     }
     plan_system_prompt = (
         "You are a Senior Engineer specialized in coding algorithms and will create an implementation plan for a demo app.\n"
-        "Your task is to write detailed pseudo-code for each endpoint in the provided API spec.\n"
+        "Your task is to write detailed pseudo-code that covers each and all endpoints in the provided API spec.\n"
         "RULES (demo-only):\n"
         "1. Surface the core value prop using hardcoded users, in-memory data, and no production services—this is a short-lived demo.\n"
         "2. For each endpoint, detail the logic: how to handle the request, what data to fetch from the in-memory `DB`, how to process it, and what to return.\n"
@@ -1816,10 +1875,12 @@ def engineering_code_reasoning_node(state: AgentState):
     plan_user_prompt = f"""
     Product Idea (for context): {state['product_idea']}
     User Stories (for business logic context): {state.get('user_stories') or 'N/A'}
+    API Reasoning Steps (for architectural context): {state.get('reasoning_spec') or 'Unavailable.'}
+    
     API Specification (source of truth):
     {state.get('engineering_spec') or 'Unavailable.'}
 
-    Based on the API specification and user stories, provide a detailed implementation plan in pseudo-code.
+    Based on the API specification and product's user stories, provide a detailed implementation plan for all spec schema in pseudo-code.
     """
     plan_parsed = call_ollama_json(plan_system_prompt, plan_user_prompt, plan_schema, reasoning=True)
     if not plan_parsed or not plan_parsed.get("implementation_plan"):
@@ -2219,16 +2280,18 @@ def get_pending_approval(db: Session = Depends(get_db)):
         "pending_spec_approval",
         "pending_code_reasoning_approval",
         "pending_code_approval",
+        "pending_approval",
     ]
     pending_task = (
         db.query(Task)
         .filter(Task.status.in_(pending_statuses))
-        .order_by(Task.task_id)
+        .order_by(Task.task_id.desc())
         .first()
     )
     if pending_task:
         return TaskStatus.from_orm(pending_task)
     return None
+
 
 @app.get("/tasks", response_model=List[TaskStatus])
 def list_tasks(db: Session = Depends(get_db)):
@@ -2466,14 +2529,17 @@ async def resubmit_step(request: ResubmitRequest, db: Session = Depends(get_db))
     logger.info("Task %s resubmitted for step %s, status is now %s", request.task_id, request.step, db_task.status)
     return TaskStatus.from_orm(db_task)
 
+
 # --- Static File and Status Endpoints ---
 @app.get("/", include_in_schema=False)
 async def read_index():
     return FileResponse("index.html")
 
+
 @app.get("/status")
 def read_root():
     return {"message": "Welcome to the Multi-Agent Product Squad API!"}
+
 
 @app.get("/tasks_dashboard", include_in_schema=False)
 async def read_tasks_dashboard():
