@@ -1,4 +1,4 @@
-# version 0.7 -- unbundling of engineering agents (reasoning as a separate step)
+# version 0.8 -- refactoring of UX artifacts rendering on screen
 
 import os
 import json
