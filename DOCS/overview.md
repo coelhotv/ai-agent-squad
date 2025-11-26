@@ -16,6 +16,8 @@ Ship a scoped, human-reviewed deliverable bundle for every validated idea: resea
 - Mermaid.js user flow diagram and Tailwind/HTML wireframe that preview in the UI.
 - Architect-generated API spec (`schemas` + `endpoints`) plus a QA review of its completeness.
 - Engineering prototype code (`main.py`-style FastAPI) plus QA commentary before final approval.
+- Front-end bundle plan + React/Vite code + optional screenshot for the demo UI that calls the prototype endpoints.
+- DevOps plan + single-container Dockerfile (8080) + smoke test notes/logs for the demo image.
 - Human edits captured on any pending artifact and synchronized back into the LangGraph checkpoint.
 - Status metadata (`status`, `pending_approval_content`, `last_rejected_step`, `last_rejected_at`) persisted in `tasks.db` for dashboards and exports.
 
@@ -29,10 +31,12 @@ Ship a scoped, human-reviewed deliverable bundle for every validated idea: resea
 - **Architect Agent:** Runs a reasoning Ollama prompt (reasoning model) to outline schemas/endpoints, then asks the coding model to emit the contract JSON.
 - **Engineering Agent:** Implements the contract as a single-file FastAPI prototype, then triggers a QA review of the spec and code before human approval.
 - **QA Agents:** Immediately review the architect spec and the generated code for demo-level completeness; their findings are saved as artifacts.
+- **Front-End Agent:** Drafts a UI plan, then generates a React/Vite bundle (plus screenshot placeholder) that surfaces the prototype endpoints or mocks.
+- **DevOps Agent:** Produces a single-container Dockerfile (8080) to run API + built UI, outlines the deployment plan, and records smoke test steps/results.
 - **GTM Agent (future):** Will translate the finished artifacts into a README/package for launch and mark the task as `ready_for_gtm`/`completed`.
 
 ## Workflow Controls
 
-Each node in the graph runs once, writes its artifact into `tasks.db`, and interrupts with a `pending_*` status (`pending_research_approval`, `pending_prd_approval`, `pending_story_approval`, `pending_ux_approval`, `pending_spec_approval`, `pending_code_approval`). `index.html` polls `/get_pending_approval`, locks the submission form, renders the pending artifact(s), and shows approval/reject buttons. Humans can edit any artifact while its status is pending—the edit sends `/update_artifact`, which writes back to the graph checkpoint so downstream agents see the updated copy. If a task is rejected, the UI surfaces a resubmit banner; calling `/resubmit_step` reruns only that node and clears downstream fields so the graph restarts cleanly.
+Each node in the graph runs once, writes its artifact into `tasks.db`, and interrupts with a `pending_*` status (`pending_research_approval`, `pending_prd_approval`, `pending_story_approval`, `pending_ux_approval`, `pending_spec_approval`, `pending_code_approval`, `pending_frontend_plan_approval`, `pending_frontend_code_approval`, `pending_devops_plan_approval`, `pending_devops_test_approval`). `index.html` polls `/get_pending_approval`, locks the submission form, renders the pending artifact(s), and shows approval/reject buttons. Humans can edit any artifact while its status is pending—the edit sends `/update_artifact`, which writes back to the graph checkpoint so downstream agents see the updated copy. If a task is rejected, the UI surfaces a resubmit banner; calling `/resubmit_step` reruns only that node and clears downstream fields so the graph restarts cleanly.
 
 Link back to `DOCS/architecture.md`, `DOCS/workflow.md`, and `README.md` for implementation specifics and quick-start instructions.

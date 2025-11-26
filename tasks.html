@@ -207,6 +207,12 @@
                     <td><div class="wide-cell"><pre>${escapeHtml(task.reasoning_code || '')}</pre></div></td>
                     <td><div class="wide-cell"><pre>${escapeHtml(task.engineering_code || '')}</pre></div></td>
                     <td><div class="wide-cell"><pre>${escapeHtml(task.engineering_qa || '')}</pre></div></td>
+                    <td><div class="wide-cell"><pre>${escapeHtml(task.frontend_plan || '')}</pre></div></td>
+                    <td><div class="wide-cell"><pre>${escapeHtml(task.frontend_code || '')}</pre></div></td>
+                    <td><div class="wide-cell"><pre>${escapeHtml(task.frontend_screenshot || '')}</pre></div></td>
+                    <td><div class="wide-cell"><pre>${escapeHtml(task.devops_plan || '')}</pre></div></td>
+                    <td><div class="wide-cell"><pre>${escapeHtml(task.devops_compose || '')}</pre></div></td>
+                    <td><div class="wide-cell"><pre>${escapeHtml(task.devops_smoke_results || '')}</pre></div></td>
                     <td>${escapeHtml(task.last_rejected_step || '')}</td>
                     <td>${escapeHtml(task.last_rejected_at || '')}</td>
                     <td>${renderResubmit(task)}</td>
@@ -233,6 +239,12 @@
                                 <th>Code Reasoning</th>
                                 <th>Eng. Prototype</th>
                                 <th>Engineering QA</th>
+                                <th>Frontend Plan</th>
+                                <th>Frontend Code</th>
+                                <th>Frontend Screenshot</th>
+                                <th>DevOps Plan</th>
+                                <th>DevOps Dockerfile</th>
+                                <th>DevOps Smoke</th>
                                 <th>Last Rejected Step</th>
                                 <th>Last Rejected At</th>
                                 <th>Resubmit</th>

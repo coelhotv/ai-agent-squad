@@ -1,4 +1,4 @@
-# version 0.9 -- new frontend and devops agents added
+# version 0.8 -- refactoring of UX artifacts rendering on screen
 
 import os
 import json
@@ -72,12 +72,6 @@ class Task(Base):
     engineering_file_name = Column(Text, nullable=True)
     engineering_code = Column(Text, nullable=True)
     engineering_qa = Column(Text, nullable=True)
-    frontend_plan = Column(Text, nullable=True)
-    frontend_code = Column(Text, nullable=True)
-    frontend_screenshot = Column(Text, nullable=True)
-    devops_plan = Column(Text, nullable=True)
-    devops_compose = Column(Text, nullable=True)
-    devops_smoke_results = Column(Text, nullable=True)
     last_rejected_step = Column(Text, nullable=True)
     last_rejected_at = Column(String, nullable=True)
 
@@ -104,12 +98,6 @@ for col_name in (
     "engineering_file_name",
     "engineering_code",
     "engineering_qa",
-    "frontend_plan",
-    "frontend_code",
-    "frontend_screenshot",
-    "devops_plan",
-    "devops_compose",
-    "devops_smoke_results",
     "last_rejected_step",
     "last_rejected_at",
 ):
@@ -142,14 +130,7 @@ class AgentState(TypedDict):
     engineering_file_name: Optional[str]
     engineering_code: Optional[str]
     engineering_qa: Optional[str]
-    frontend_plan: Optional[str]
-    frontend_code: Optional[str]
-    frontend_screenshot: Optional[str]
-    devops_plan: Optional[str]
-    devops_compose: Optional[str]
-    devops_smoke_results: Optional[str]
     last_rejected_step: Optional[str]
-    last_rejected_at: Optional[str]
 
 
 # Keep the async connection open for the lifetime of the app and close on shutdown.
@@ -1732,509 +1713,6 @@ def run_duckduckgo_research(product_idea: str) -> str:
     return "No public findings were returned for this idea."
 
 
-def infer_endpoints_from_inputs(spec_contract: str | None, engineering_code: str | None) -> list[dict[str, str]]:
-    """Collect endpoints from the spec contract JSON and code decorators to inform FE/DevOps planning."""
-    endpoints: list[dict[str, str]] = []
-    seen: set[tuple[str, str]] = set()
-
-    if spec_contract:
-        try:
-            parsed = json.loads(spec_contract)
-            for ep in parsed.get("endpoints", []) or []:
-                method = str(ep.get("method") or "GET").upper()
-                path = ep.get("path") or "/"
-                key = (method, path)
-                if key not in seen:
-                    seen.add(key)
-                    endpoints.append(
-                        {
-                            "method": method,
-                            "path": path,
-                            "response_model": ep.get("response_model") or "",
-                        }
-                    )
-        except json.JSONDecodeError:
-            logger.warning("Could not parse engineering_spec to infer endpoints.")
-
-    if engineering_code:
-        pattern = re.compile(r"@app\.(get|post|put|delete|patch)\([\"']([^\"']+)[\"']")
-        for match in pattern.finditer(engineering_code):
-            method = match.group(1).upper()
-            path = match.group(2)
-            key = (method, path)
-            if key not in seen:
-                seen.add(key)
-                endpoints.append({"method": method, "path": path, "response_model": ""})
-
-    return endpoints
-
-
-def build_frontend_code_bundle(endpoints: list[dict[str, str]], api_base: str = "http://localhost:8080") -> str:
-    """Return a compact, ready-to-use React + Vite bundle description with core files."""
-    primary_endpoint = endpoints[0] if endpoints else {"method": "GET", "path": "/health", "response_model": ""}
-    method = primary_endpoint.get("method", "GET")
-    path = primary_endpoint.get("path", "/")
-    response_model = primary_endpoint.get("response_model") or "unknown"
-    logger.warning("Front-end code bundle failed. Generating fallback code!")
-
-    return f"""
-# React + Vite demo bundle
-
-## package.json
-{{ 
-  "name": "demo-frontend",
-  "private": true,
-  "version": "0.0.1",
-  "scripts": {{ 
-    "dev": "vite",
-    "build": "vite build",
-    "preview": "vite preview",
-    "screenshot": "node scripts/screenshot.js" 
-  }},
-  "dependencies": {{ 
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1" 
-  }},
-  "devDependencies": {{ 
-    "@types/react": "^18.2.0",
-    "@types/react-dom": "^18.2.0",
-    "vite": "^5.0.0",
-    "@playwright/test": "^1.43.0" 
-  }} 
-}}
-
-## vite.config.js
-import {{ defineConfig }} from "vite";
-import react from "@vitejs/plugin-react";
-export default defineConfig({{ plugins: [react()], server: {{ port: 5173 }} }});
-
-## src/main.jsx
-import React from "react";
-import ReactDOM from "react-dom/client";
-import App from "./App";
-import "./index.css";
-ReactDOM.createRoot(document.getElementById("root")).render(<App />);
-
-## src/api.js
-export const API_BASE = "{api_base}";
-export async function fetchSample(params = null) {{
-  const url = new URL("{path}", API_BASE);
-  if (params && "{method}" === "GET") {{
-    Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
-  }}
-  const res = await fetch(url.toString(), {{
-    method: "{method}",
-    headers: {{ "Content-Type": "application/json" }},
-    ...(params && "{method}" !== "GET" ? {{ body: JSON.stringify(params) }} : {{}})
-  }});
-  const text = await res.text();
-  let data;
-  try {{ data = JSON.parse(text); }} catch (err) {{ data = text; }}
-  return {{ ok: res.ok, status: res.status, data }};
-}}
-
-## src/App.jsx
-import React, {{ useState }} from "react";
-import {{ fetchSample }} from "./api";
-
-export default function App() {{
-  const [payload, setPayload] = useState("{{}}");
-  const [result, setResult] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
-
-  const handleSubmit = async (e) => {{
-    e.preventDefault();
-    setError(null);
-    setLoading(true);
-    try {{
-      const parsed = payload ? JSON.parse(payload) : null;
-      const response = await fetchSample(parsed);
-      setResult(response);
-    }} catch (err) {{
-      setError("Invalid JSON payload");
-    }} finally {{
-      setLoading(false);
-    }}
-  }};
-
-  return (
-    <div style={{{{ maxWidth: "960px", margin: "0 auto", padding: "24px", fontFamily: "Inter, sans-serif" }}}}>
-      <header style={{{{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "24px" }}}}>
-        <div>
-          <p style={{{{ margin: 0, color: "#6b7280" }}}}>Demo UI</p>
-          <h1 style={{{{ margin: 0 }}}}>{{path}}</h1>
-          <p style={{{{ margin: "4px 0", color: "#6b7280" }}}}>Method: {{method}} · Response: {{response_model}}</p>
-        </div>
-        <span style={{{{ padding: "8px 12px", background: "#eef2ff", color: "#312e81", borderRadius: "12px", fontSize: "12px" }}}}>React + Vite</span>
-      </header>
-
-      <form onSubmit={{handleSubmit}} style={{{{ display: "grid", gap: "12px" }}}}>
-        <textarea
-          rows={{4}}
-          placeholder="Optional payload (JSON for POST/PUT/PATCH)"
-          value={{payload}}
-          onChange={{(e) => setPayload(e.target.value)}}
-          style={{{{ width: "100%", padding: "12px", borderRadius: "8px", border: "1px solid #e5e7eb", fontFamily: "monospace" }}}}
-        />
-        <button type="submit" disabled={{loading}} style={{{{ padding: "12px 16px", background: "#111827", color: "white", borderRadius: "8px", border: "none", cursor: "pointer" }}}}>
-          {{loading ? "Calling API..." : `Call {method} {path}`}}
-        </button>
-      </form>
-
-      <section style={{{{ marginTop: "24px", padding: "16px", border: "1px solid #e5e7eb", borderRadius: "8px", background: "#f9fafb" }}}}>
-        <h3 style={{{{ marginTop: 0 }}}}>Result</h3>
-        {{error && <p style={{{{ color: "red" }}}}>{'{'}error{'}'}</p>}}
-        <pre style={{{{ whiteSpace: "pre-wrap" }}}}>{'{'}result ? JSON.stringify(result, null, 2) : "Run a call to see the response."{'}'}</pre>
-      </section>
-    </div>
-  );
-}}
-
-## scripts/screenshot.js
-import {{ chromium }} from "@playwright/test";
-import {{ spawn }} from "child_process";
-const server = spawn("npm", ["run", "dev", "--", "--host", "--port", "4173"], {{ stdio: "inherit" }});
-const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-await wait(3000);
-const browser = await chromium.launch({{ headless: true }});
-const page = await browser.newPage();
-await page.goto("http://127.0.0.1:4173", {{ waitUntil: "networkidle" }});
-await page.setViewportSize({{ width: 1280, height: 720 }});
-await page.screenshot({{ path: "frontend_screenshot.png", fullPage: true }});
-await browser.close();
-server.kill();
-
-## How to run locally
-1) npm install
-2) npm run dev -- --host --port 4173 (frontend); backend expected at {api_base}
-3) npm run build && npm run preview (optional)
-4) npm run screenshot (captures frontend_screenshot.png)
-"""
-
-
-def format_devops_dockerfile(app_port: int = 8080) -> str:
-    """Single-container Dockerfile that builds the frontend bundle and serves it via FastAPI static files."""
-    return f"""
-# Dockerfile for demo app (API + built React UI)
-FROM python:3.11-slim
-WORKDIR /app
-
-# System deps
-RUN apt-get update && apt-get install -y curl gnupg && rm -rf /var/lib/apt/lists/*
-
-# Install Node via official script (lightweight for Vite build)
-RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \\
-  && apt-get install -y nodejs \\
-  && rm -rf /var/lib/apt/lists/*
-
-# Python deps
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Copy app and frontend bundle
-COPY . .
-
-# Build frontend (expects frontend under ./frontend or injected by agent)
-WORKDIR /app/frontend
-RUN npm install && npm run build
-
-# Move built assets into FastAPI static dir
-RUN mkdir -p /app/static && cp -r dist/* /app/static/
-
-WORKDIR /app
-ENV PORT={app_port}
-EXPOSE {app_port}
-
-CMD ["python", "app.py"]
-"""
-
-
-def format_smoke_test_results(endpoints: list[dict[str, str]], app_port: int = 8080) -> str:
-    """Describe the smoke test steps and results for the DevOps agent."""
-    primary_endpoint = endpoints[0] if endpoints else {"method": "GET", "path": "/health"}
-    method = primary_endpoint.get("method", "GET")
-    path = primary_endpoint.get("path", "/health")
-    logger.warning("Dockerfile and/or smoke test generation failed. Switching to fallback templates!")
-
-    lines = [
-        "## Smoke test plan (simulated)",
-        f"- Build: docker build -t demo-app .",
-        f"- Run: docker run -d -p {app_port}:{app_port} --name demo-app demo-app",
-        f"- Health: curl -f http://localhost:{app_port}{path if path.startswith('/health') else '/health'} (expects 200/JSON)",
-        f"- Primary endpoint: curl -f -X {method} http://localhost:{app_port}{path}",
-        "- Validate JSON shape (lenient) and HTTP 200 response.",
-        "- Stop: docker rm -f demo-app",
-        "",
-        "## Result",
-        "Tests are described for operator execution; automate if CI is available.",
-    ]
-    return "\n".join(lines)
-
-
-
-# Helper functions for LLM-generated FE/DevOps artifacts with fallback
-
-def extract_wireframe_html_content(wireframe_html: str | None) -> str | None:
-    """Strip stored wireframe JSON down to the raw HTML content if present."""
-    if not wireframe_html:
-        return None
-    try:
-        parsed = json.loads(wireframe_html)
-        if isinstance(parsed, dict) and parsed.get("html_content"):
-            return parsed["html_content"]
-    except json.JSONDecodeError:
-        pass
-    return wireframe_html
-
-
-def format_endpoints_for_prompt(endpoints: list[dict[str, str]]) -> str:
-    if not endpoints:
-        return "None detected; default to /health."
-    return "\n".join(
-        f"- {ep.get('method', 'GET')} {ep.get('path', '/')} -> {ep.get('response_model', '')}"
-        for ep in endpoints
-    )
-
-
-def generate_frontend_plan_llm(
-    product_idea: str,
-    user_stories: str | None,
-    wireframe_html: str | None,
-    engineering_spec: str | None,
-    engineering_code: str | None,
-    endpoints: list[dict[str, str]],
-) -> Optional[str]:
-    schema = {
-        "type": "object",
-        "properties": {"plan": {"type": "string"}},
-        "required": ["plan"],
-    }
-    system_prompt = (
-        "You are a senior frontend tech lead creating a minimal demo UI plan.\n"
-        "Goal: expose the prototype API endpoints in a simple React + Vite app, using the provided context.\n"
-        "Must-use constraints:\n"
-        "- Build lives under /frontend; bundle will be built at image time and copied to FastAPI static files.\n"
-        "- Backend runs on port 8080; target http://localhost:8080 for API calls.\n"
-        "- Keep plan concise (<=12 bullets). Mention data strategy (live vs mock), key UI pieces, and how to align with the endpoints."
-    )
-    user_prompt = f"""
-    Product idea: {product_idea}
-    User stories: {user_stories or 'N/A'}
-    Wireframe: {wireframe_html or 'N/A'}
-    Engineering spec: {engineering_spec or 'N/A'}
-    Engineering code (snippet): {(engineering_code or '')[:1200]}
-    Endpoints inferred:
-    {format_endpoints_for_prompt(endpoints)}
-    """
-    parsed = call_ollama_json(system_prompt, user_prompt, schema, reasoning=True)
-    if parsed and parsed.get("plan"):
-        return parsed["plan"]
-    return None
-
-
-def generate_frontend_code_llm(
-    product_idea: str,
-    wireframe_html: str | None,
-    engineering_code: str | None,
-    frontend_plan: str | None,
-    endpoints: list[dict[str, str]],
-    api_base: str = "http://localhost:8080",
-) -> Optional[str]:
-    schema = {
-        "type": "object",
-        "properties": {"bundle": {"type": "string"}},
-        "required": ["bundle"],
-    }
-    system_prompt = """
-You are an experienced frontend engineer. Produce a React + Vite demo bundle **exactly in the format described below**.
-Bundle lives under /frontend, targets API base http://localhost:8080, and the built dist is copied into FastAPI static in the same container.
-HARD REQUIREMENTS:
-- Single container only (NO compose/nginx/multi-service commentary).
-- Output under 3000 characters.
-- No extra prose, notes, or bracketed commentary. If you cannot produce every section, output an empty string.
-- Use React 18 and @vitejs/plugin-react; include react-router-dom in dependencies; put vite, @vitejs/plugin-react, and @playwright/test in devDependencies.
-- Use fetch() directly for API calls (no custom client imports), with template literals and proper closing quotes; no mocks in src/api.js.
-- Router: only one BrowserRouter wrapper in main.jsx; App.jsx must NOT create another Router. If you use Routes/Route, each Route must use element={<Component />} (React Router v6).
-- Screenshot script must be ESM (import { chromium } from '@playwright/test'); spawn npm run dev -- --host --port 4173, wait briefly, open the page, capture PNG, then stop the server.
-STRICT OUTPUT FORMAT (exact order, no extra sections):
-# React + Vite demo bundle
-## package.json
-<json>
-## vite.config.js
-<code>
-## src/main.jsx
-<code>
-## src/App.jsx
-<code>
-## src/api.js
-<code>
-## scripts/screenshot.js
-<code>
-## How to run locally
-1) npm install
-2) npm run dev -- --host --port 4173
-3) npm run build && npm run preview
-4) npm run screenshot
-"""
-    user_prompt = f"""
-    Use the following artifacts as the input context for you to develop the frontend code bundle, outputting it in the JSON schema provided.
-
-    Product idea (context): {product_idea}
-    Wireframe (context): {wireframe_html or 'N/A'}
-    Engineering code (context snippet): {(engineering_code or '')[:1200]}
-    Endpoints inferred (input): {format_endpoints_for_prompt(endpoints)}
-    API base to target (input): {api_base}
-    Frontend plan (mandatory): {frontend_plan or 'N/A'}
-
-    Remember: obey the strict output format above and do NOT add extra sections or explanations.
-    """
-    parsed = call_ollama_json(system_prompt, user_prompt, schema)
-    if parsed and parsed.get("bundle"):
-        return parsed["bundle"]
-    return None
-
-
-def validate_frontend_bundle(bundle: str | None) -> bool:
-    """Basic sanity check to ensure the LLM output includes required sections."""
-    if not bundle:
-        return False
-    required_headers = [
-        "# React + Vite demo bundle",
-        "## package.json",
-        "## vite.config.js",
-        "## src/main.jsx",
-        "## src/App.jsx",
-        "## src/api.js",
-        "## scripts/screenshot.js",
-        "## How to run locally",
-    ]
-    if not all(header in bundle for header in required_headers):
-        return False
-    banned_snippets = [
-        "@vitejs/plugin-react/runtime/client",
-        "mock",
-        "Mock",
-        "require(",
-    ]
-    if any(snippet in bundle for snippet in banned_snippets):
-        return False
-    # Must mention fetch (prefer real calls) and Playwright npm script hints
-    if "fetch(" not in bundle:
-        return False
-    # Require key dependencies
-    required_deps = ["react-router-dom", "@playwright/test", "@vitejs/plugin-react", "\"react\": \"^18"]
-    if not all(dep in bundle for dep in required_deps):
-        return False
-    # Require evidence of dev server spawn in screenshot script
-    if "spawn(" not in bundle and "npm run dev" not in bundle:
-        return False
-    # Router sanity: avoid double BrowserRouter usage
-    if bundle.count("BrowserRouter") > 1:
-        return False
-    return True
-
-
-def validate_devops_artifacts(dockerfile: str | None, smoke: str | None) -> bool:
-    """Sanity check DevOps outputs to avoid drift into DB/init/env and enforce essentials."""
-    if not dockerfile or not smoke:
-        return False
-    banned = ["init_db", "DATABASE_URL", "ENV ", "ENV\t", "docker-compose", "volume", "alembic"]
-    if any(b in dockerfile for b in banned):
-        return False
-    if "reload" in dockerfile:
-        return False
-    required_dk = ["python:3.11-slim", "/frontend", "npm run build", "/app/static", "uvicorn app:app --host 0.0.0.0 --port 8080"]
-    if not all(item in dockerfile for item in required_dk):
-        return False
-    # smoke should hit /health (or root) without /api prefix
-    if "/api/" in smoke:
-        return False
-    if "curl" not in smoke:
-        return False
-    return True
-
-
-
-def generate_devops_plan_llm(
-    product_idea: str,
-    engineering_spec: str | None,
-    engineering_code: str | None,
-    endpoints: list[dict[str, str]],
-    frontend_plan: str | None,
-) -> Optional[str]:
-    schema = {"type": "object", "properties": {"plan": {"type": "string"}}, "required": ["plan"]}
-    system_prompt = (
-        "You are a DevOps engineer designing a local demo deployment. Output a SHORT BULLET LIST (max 8 bullets, each starting with '-') "
-        "for a single Dockerfile (python:3.11-slim) that builds the React/Vite frontend (/frontend) and serves it via FastAPI static files on port 8080.\n"
-        "**Hard requirements:**\n"
-        "- Single container, single stage; NO compose, NO extra services, NO volumes, NO env files, NO DB/schema/migration changes.\n"
-        "- Build frontend inside '/frontend' (npm install && npm run build); copy dist into /app/static.\n"
-        "- Install Python deps from requirements.txt; run FastAPI via `python app.py` or `uvicorn app:app --host 0.0.0.0 --port 8080`.\n"
-        "- Expose port 8080; assume API base http://localhost:8080 (no prefixes).\n"
-        "- Smoke mention: curl /health (or root) and one primary endpoint; keep it to one line.\n"
-        "Keep it concise; no paragraphs, no DB setup, no migrations, no alembic, no .env guidance -- just a plan for fellow devops implement."
-    )
-    user_prompt = f"""
-    Use the following artifacts as the input context for you to develop the DevOps plan, outputting it in the JSON schema provided.
-    
-    Product idea (context): {product_idea}
-    API spec: {engineering_spec or 'N/A'}
-    Python code (snippet): {(engineering_code or '')[:1200]}
-    Endpoints inferred: {format_endpoints_for_prompt(endpoints)}
-    Frontend plan: {frontend_plan or 'N/A'}
-    """
-    parsed = call_ollama_json(system_prompt, user_prompt, schema, reasoning=True)
-    if parsed and parsed.get("plan"):
-        return parsed["plan"]
-    return None
-
-
-def generate_devops_test_llm(
-    product_idea: str,
-    engineering_spec: str | None,
-    engineering_code: str | None,
-    endpoints: list[dict[str, str]],
-    frontend_code: str | None,
-    devops_plan: str | None,
-    app_port: int = 8080,
-) -> tuple[Optional[str], Optional[str]]:
-    schema = {
-        "type": "object",
-        "properties": {
-            "dockerfile": {"type": "string"},
-            "smoke": {"type": "string"},
-        },
-        "required": ["dockerfile", "smoke"],
-    }
-    system_prompt = (
-        "You are a DevOps engineer. Produce a Dockerfile and smoke test steps following the provided devops plan, targeting "
-        "a single-container demo: build React/Vite frontend under /frontend, copy dist to FastAPI static, run app.py on port 8080. "
-        "Use python:3.11-slim. Keep the Dockerfile minimal and the smoke steps concise (build, run, curl /health + one primary endpoint).\n"
-        "HARD REQUIREMENTS:\n"
-        "- Single stage/container; NO compose, NO extra services, NO volumes, NO env files, NO DB/init scripts.\n"
-        "- Build frontend inside /frontend (npm install && npm run build); copy /frontend/dist into /app/static.\n"
-        "- Install Python deps from requirements.txt. Run FastAPI via `uvicorn app:app --host 0.0.0.0 --port 8080` (no reload flag).\n"
-        "- Expose port 8080; assume API base http://localhost:8080 (no prefixes or /api/ in smoke commands).\n"
-        "- Do not mention implementing endpoints or changing backend code—Dockerfile and smoke only.\n"
-        "- Smoke: one-line curl for /health (or root) and one primary endpoint."
-    )
-    user_prompt = f"""
-    Product idea: {product_idea}
-    Engineering spec: {engineering_spec or 'N/A'}
-    Engineering code (snippet): {(engineering_code or '')[:1200]}
-    Endpoints inferred:
-    {format_endpoints_for_prompt(endpoints)}
-    Frontend code: {frontend_code or 'N/A'}
-    DevOps plan: {devops_plan or 'N/A'}
-    Target port: {app_port}
-    """
-    parsed = call_ollama_json(system_prompt, user_prompt, schema)
-    dockerfile = parsed.get("dockerfile") if parsed else None
-    smoke = parsed.get("smoke") if parsed else None
-    return dockerfile, smoke
-
-
 # --- Agent Node Functions ---
 
 def research_node(state: AgentState):
@@ -2289,7 +1767,6 @@ def ux_design_node(state: AgentState):
 
 def engineering_spec_reasoning_node(state: AgentState):
     logger.info(f"--- Node: engineering_spec_reasoning_node (Task ID: {state['task_id']}) ---")
-    wireframe_html_clean = extract_wireframe_html_content(state.get('wireframe_html'))
     reasoning_schema = {
         "type": "object",
         "properties": {
@@ -2321,7 +1798,7 @@ def engineering_spec_reasoning_node(state: AgentState):
     {state.get('user_stories') or 'Unavailable.'}
 
     Wireframe HTML:
-    {wireframe_html_clean or 'Unavailable.'}
+    {state.get('wireframe_html') or 'Unavailable.'}
     """
     reasoning_parsed = call_ollama_json(reasoning_system_prompt, reasoning_user_prompt, reasoning_schema, reasoning=True)
     if not reasoning_parsed or not reasoning_parsed.get("detailed_steps"):
@@ -2340,11 +1817,10 @@ def engineering_spec_reasoning_node(state: AgentState):
 def engineering_spec_node(state: AgentState):
     logger.info(f"--- Node: engineering_spec_node (Task ID: {state['task_id']}) ---")
     logger.info("... Running architect to generate spec.")
-    wireframe_html_clean = extract_wireframe_html_content(state.get('wireframe_html'))
     spec = generate_engineering_spec(
         state['product_idea'],
         state.get('user_stories'),
-        wireframe_html_clean,
+        state.get('wireframe_html'),
         reasoning_override=state.get('reasoning_spec'),
         # No longer passing QA feedback
     )
@@ -2449,120 +1925,6 @@ def engineering_node(state: AgentState):
     return state
 
 
-def frontend_plan_node(state: AgentState):
-    logger.info(f"--- Node: frontend_plan_node (Task ID: {state['task_id']}) ---")
-    endpoints = infer_endpoints_from_inputs(state.get('engineering_spec'), state.get('engineering_code'))
-    wireframe_html_clean = extract_wireframe_html_content(state.get('wireframe_html'))
-    plan_llm = generate_frontend_plan_llm(
-        state.get('product_idea'),
-        state.get('user_stories'),
-        wireframe_html_clean,
-        state.get('engineering_spec'),
-        state.get('engineering_code'),
-        endpoints,
-    )
-    if plan_llm:
-        state['frontend_plan'] = plan_llm
-    else:
-        endpoint_lines = [f"- {ep.get('method')} {ep.get('path')} (response: {ep.get('response_model') or 'unknown'})" for ep in endpoints] or ["- No endpoints detected; defaulting to mock data."]
-        plan_lines = [
-            "## Frontend Plan",
-            f"- Product idea: {state.get('product_idea')}",
-            "- Inputs: product idea, user stories, wireframe, engineering spec, engineering code.",
-            "- Framework: React + Vite (lightweight).",
-            "- Data strategy: prefer live API calls; fallback to mock if endpoint unreachable.",
-            "- UI focus: expose core endpoints with form inputs and response viewer.",
-            "- Screenshot: capture via Playwright after build.",
-            "",
-            "### Endpoints to surface",
-            *endpoint_lines,
-        ]
-        state['frontend_plan'] = "\n".join(plan_lines)
-    state['status'] = "pending_frontend_plan_approval"
-    state['pending_approval_content'] = (
-        "Frontend plan drafted. Review and approve to generate React bundle and screenshot."
-    )
-    return state
-
-
-def frontend_code_node(state: AgentState):
-    logger.info(f"--- Node: frontend_code_node (Task ID: {state['task_id']}) ---")
-    endpoints = infer_endpoints_from_inputs(state.get('engineering_spec'), state.get('engineering_code'))
-    wireframe_html_clean = extract_wireframe_html_content(state.get('wireframe_html'))
-    code_llm = generate_frontend_code_llm(
-        state.get('product_idea'),
-        wireframe_html_clean,
-        state.get('engineering_code'),
-        state.get('frontend_plan'),
-        endpoints,
-    )
-    state['frontend_code'] = code_llm if validate_frontend_bundle(code_llm) else build_frontend_code_bundle(endpoints)
-    state['frontend_screenshot'] = (
-        "Screenshot placeholder: run `npm install`, `npm run screenshot` in the frontend folder to capture frontend_screenshot.png."
-    )
-    state['status'] = "pending_frontend_code_approval"
-    state['pending_approval_content'] = (
-        "Frontend code bundle ready. Review the React/Vite output and approve to proceed to DevOps."
-    )
-    return state
-
-
-def devops_plan_node(state: AgentState):
-    logger.info(f"--- Node: devops_plan_node (Task ID: {state['task_id']}) ---")
-    endpoints = infer_endpoints_from_inputs(state.get('engineering_spec'), state.get('engineering_code'))
-    plan_llm = generate_devops_plan_llm(
-        state.get('product_idea'),
-        state.get('engineering_spec'),
-        state.get('engineering_code'),
-        endpoints,
-        state.get('frontend_plan'),
-    )
-    if plan_llm:
-        state['devops_plan'] = plan_llm
-    else:
-        lines = [
-            "## DevOps Plan",
-            "- Packaging: single Dockerfile (Python 3.11-slim) including built React UI served by FastAPI static files.",
-            "- Ports: expose 8080 to avoid clashing with local 8000.",
-            "- Data: include SQLite/db file if present; otherwise app bootstraps empty state.",
-            "- Frontend: build Vite bundle during image build and copy to /app/static.",
-            "- Runtime: start FastAPI via `python app.py` (assumes uvicorn block uses PORT env).",
-            "- Smoke: build, run, hit health and primary endpoint.",
-            "",
-            "### Endpoints considered for smoke",
-        ]
-        lines.extend([f"- {ep.get('method')} {ep.get('path')}" for ep in endpoints] or ["- None detected; will smoke /health only."])
-        state['devops_plan'] = "\n".join(lines)
-    state['status'] = "pending_devops_plan_approval"
-    state['pending_approval_content'] = "DevOps plan ready. Approve to build Dockerfile and generate smoke test steps."
-    return state
-
-
-def devops_test_node(state: AgentState):
-    logger.info(f"--- Node: devops_test_node (Task ID: {state['task_id']}) ---")
-    endpoints = infer_endpoints_from_inputs(state.get('engineering_spec'), state.get('engineering_code'))
-    dockerfile_llm, smoke_llm = generate_devops_test_llm(
-        state.get('product_idea'),
-        state.get('engineering_spec'),
-        state.get('engineering_code'),
-        endpoints,
-        state.get('frontend_code'),
-        state.get('devops_plan'),
-        app_port=8080,
-    )
-    if validate_devops_artifacts(dockerfile_llm, smoke_llm):
-        state['devops_compose'] = dockerfile_llm
-        state['devops_smoke_results'] = smoke_llm
-    else:
-        state['devops_compose'] = format_devops_dockerfile(app_port=8080)
-        state['devops_smoke_results'] = format_smoke_test_results(endpoints, app_port=8080)
-    state['status'] = "pending_devops_test_approval"
-    state['pending_approval_content'] = (
-        "DevOps artifacts ready (Dockerfile + smoke plan). Review results and approve to mark the task completed."
-    )
-    return state
-
-
 def approved_node(state: AgentState):
     logger.info(f"--- Node: approved_node (Task ID: {state['task_id']}) ---")
     state['status'] = "completed"
@@ -2580,10 +1942,6 @@ workflow.add_node("engineering_spec_reasoning", engineering_spec_reasoning_node)
 workflow.add_node("engineering_spec", engineering_spec_node)
 workflow.add_node("engineering_code_reasoning", engineering_code_reasoning_node)
 workflow.add_node("engineering", engineering_node)
-workflow.add_node("frontend_plan", frontend_plan_node)
-workflow.add_node("frontend_code", frontend_code_node)
-workflow.add_node("devops_plan", devops_plan_node)
-workflow.add_node("devops_test", devops_test_node)
 workflow.add_node("approved", approved_node)
 workflow.set_entry_point("research")
 workflow.add_edge("research", "product_prd")
@@ -2593,11 +1951,7 @@ workflow.add_edge("ux_design", "engineering_spec_reasoning")
 workflow.add_edge("engineering_spec_reasoning", "engineering_spec")
 workflow.add_edge("engineering_spec", "engineering_code_reasoning")
 workflow.add_edge("engineering_code_reasoning", "engineering")
-workflow.add_edge("engineering", "frontend_plan")
-workflow.add_edge("frontend_plan", "frontend_code")
-workflow.add_edge("frontend_code", "devops_plan")
-workflow.add_edge("devops_plan", "devops_test")
-workflow.add_edge("devops_test", "approved")
+workflow.add_edge("engineering", "approved")
 workflow.add_edge("approved", END)
 
 
@@ -2617,10 +1971,6 @@ async def initialize_graph():
             "engineering_spec",
             "engineering_code_reasoning",
             "engineering",
-            "frontend_plan",
-            "frontend_code",
-            "devops_plan",
-            "devops_test",
             "approved",
         ],
     )
@@ -2673,12 +2023,6 @@ class TaskStatus(BaseModel):
     engineering_file_name: Optional[str] = None
     engineering_code: Optional[str] = None
     engineering_qa: Optional[str] = None
-    frontend_plan: Optional[str] = None
-    frontend_code: Optional[str] = None
-    frontend_screenshot: Optional[str] = None
-    devops_plan: Optional[str] = None
-    devops_compose: Optional[str] = None
-    devops_smoke_results: Optional[str] = None
     last_rejected_step: Optional[str] = None
     last_rejected_at: Optional[str] = None
     class Config:
@@ -2711,10 +2055,6 @@ PENDING_STATUSES = {
     "pending_spec_approval",
     "pending_code_reasoning_approval",
     "pending_code_approval",
-    "pending_frontend_plan_approval",
-    "pending_frontend_code_approval",
-    "pending_devops_plan_approval",
-    "pending_devops_test_approval",
     "pending_approval",
 }
 
@@ -2728,10 +2068,6 @@ STEP_STATUS_MAP = {
     "engineering_spec": "pending_spec_approval",
     "engineering_code_reasoning": "pending_code_reasoning_approval",
     "engineering_code": "pending_code_approval",
-    "frontend_plan": "pending_frontend_plan_approval",
-    "frontend_code": "pending_frontend_code_approval",
-    "devops_plan": "pending_devops_plan_approval",
-    "devops_test": "pending_devops_test_approval",
 }
 
 
@@ -2751,12 +2087,6 @@ def clear_artifacts_for_step(db_task: Task, step: str):
             "engineering_file_name",
             "engineering_code",
             "engineering_qa",
-            "frontend_plan",
-            "frontend_code",
-            "frontend_screenshot",
-            "devops_plan",
-            "devops_compose",
-            "devops_smoke_results",
         ],
         "product_prd": [
             "prd_summary",
@@ -2770,12 +2100,6 @@ def clear_artifacts_for_step(db_task: Task, step: str):
             "engineering_file_name",
             "engineering_code",
             "engineering_qa",
-            "frontend_plan",
-            "frontend_code",
-            "frontend_screenshot",
-            "devops_plan",
-            "devops_compose",
-            "devops_smoke_results",
         ],
         "product_stories": [
             "user_stories",
@@ -2788,12 +2112,6 @@ def clear_artifacts_for_step(db_task: Task, step: str):
             "engineering_file_name",
             "engineering_code",
             "engineering_qa",
-            "frontend_plan",
-            "frontend_code",
-            "frontend_screenshot",
-            "devops_plan",
-            "devops_compose",
-            "devops_smoke_results",
         ],
         "ux_design": [
             "user_flow_diagram",
@@ -2806,12 +2124,6 @@ def clear_artifacts_for_step(db_task: Task, step: str):
             "engineering_file_name",
             "engineering_code",
             "engineering_qa",
-            "frontend_plan",
-            "frontend_code",
-            "frontend_screenshot",
-            "devops_plan",
-            "devops_compose",
-            "devops_smoke_results",
         ],
         "engineering_spec_reasoning": [
             # keep reasoning_spec intact so downstream reuse works
@@ -2821,12 +2133,6 @@ def clear_artifacts_for_step(db_task: Task, step: str):
             "engineering_file_name",
             "engineering_code",
             "engineering_qa",
-            "frontend_plan",
-            "frontend_code",
-            "frontend_screenshot",
-            "devops_plan",
-            "devops_compose",
-            "devops_smoke_results",
         ],
         "engineering_spec": [
             "engineering_spec",
@@ -2835,59 +2141,17 @@ def clear_artifacts_for_step(db_task: Task, step: str):
             "engineering_file_name",
             "engineering_code",
             "engineering_qa",
-            "frontend_plan",
-            "frontend_code",
-            "frontend_screenshot",
-            "devops_plan",
-            "devops_compose",
-            "devops_smoke_results",
         ],
         "engineering_code_reasoning": [
             # keep reasoning_code intact so downstream reuse works
             "engineering_file_name",
             "engineering_code",
             "engineering_qa",
-            "frontend_plan",
-            "frontend_code",
-            "frontend_screenshot",
-            "devops_plan",
-            "devops_compose",
-            "devops_smoke_results",
         ],
         "engineering_code": [
             "engineering_file_name",
             "engineering_code",
             "engineering_qa",
-            "frontend_plan",
-            "frontend_code",
-            "frontend_screenshot",
-            "devops_plan",
-            "devops_compose",
-            "devops_smoke_results",
-        ],
-        "frontend_plan": [
-            "frontend_plan",
-            "frontend_code",
-            "frontend_screenshot",
-            "devops_plan",
-            "devops_compose",
-            "devops_smoke_results",
-        ],
-        "frontend_code": [
-            "frontend_code",
-            "frontend_screenshot",
-            "devops_plan",
-            "devops_compose",
-            "devops_smoke_results",
-        ],
-        "devops_plan": [
-            "devops_plan",
-            "devops_compose",
-            "devops_smoke_results",
-        ],
-        "devops_test": [
-            "devops_compose",
-            "devops_smoke_results",
         ],
     }
     fields = downstream_fields.get(step, [])
@@ -2907,10 +2171,6 @@ def status_to_step(status: str | None) -> Optional[str]:
         "pending_spec_approval": "engineering_spec",
         "pending_code_reasoning_approval": "engineering_code_reasoning",
         "pending_code_approval": "engineering_code",
-        "pending_frontend_plan_approval": "frontend_plan",
-        "pending_frontend_code_approval": "frontend_code",
-        "pending_devops_plan_approval": "devops_plan",
-        "pending_devops_test_approval": "devops_test",
     }
     return inverse.get(status)
 
@@ -2933,14 +2193,7 @@ def build_state_from_task(db_task: Task) -> AgentState:
         "engineering_file_name": db_task.engineering_file_name,
         "engineering_code": db_task.engineering_code,
         "engineering_qa": db_task.engineering_qa,
-        "frontend_plan": db_task.frontend_plan,
-        "frontend_code": db_task.frontend_code,
-        "frontend_screenshot": db_task.frontend_screenshot,
-        "devops_plan": db_task.devops_plan,
-        "devops_compose": db_task.devops_compose,
-        "devops_smoke_results": db_task.devops_smoke_results,
         "last_rejected_step": db_task.last_rejected_step,
-        "last_rejected_at": db_task.last_rejected_at,
     }
 
 # --- API Endpoints (Refactored) ---
@@ -2979,12 +2232,6 @@ async def start_task(request: StartTaskRequest, db: Session = Depends(get_db)):
         engineering_file_name=None,
         engineering_code=None,
         engineering_qa=None,
-        frontend_plan=None,
-        frontend_code=None,
-        frontend_screenshot=None,
-        devops_plan=None,
-        devops_compose=None,
-        devops_smoke_results=None,
         last_rejected_step=None,
         last_rejected_at=None,
     )
@@ -3007,19 +2254,13 @@ async def start_task(request: StartTaskRequest, db: Session = Depends(get_db)):
     db_task.user_stories = interrupted_state.values.get('user_stories')
     db_task.user_flow_diagram = interrupted_state.values.get('user_flow_diagram')
     db_task.wireframe_html = interrupted_state.values.get('wireframe_html')
-    db_task.reasoning_spec = interrupted_state.values.get('reasoning_spec')
+    db_task.reasoning_spec = interrupted_state.values.get('resoning_spec')
     db_task.engineering_spec = interrupted_state.values.get('engineering_spec')
     db_task.engineering_spec_qa = interrupted_state.values.get('engineering_spec_qa')
-    db_task.reasoning_code = interrupted_state.values.get('reasoning_code')
+    db_task.reasoning_code = interrupted_state.values.get('resoning_code')
     db_task.engineering_file_name = interrupted_state.values.get('engineering_file_name')
     db_task.engineering_code = interrupted_state.values.get('engineering_code')
     db_task.engineering_qa = interrupted_state.values.get('engineering_qa')
-    db_task.frontend_plan = interrupted_state.values.get('frontend_plan')
-    db_task.frontend_code = interrupted_state.values.get('frontend_code')
-    db_task.frontend_screenshot = interrupted_state.values.get('frontend_screenshot')
-    db_task.devops_plan = interrupted_state.values.get('devops_plan')
-    db_task.devops_compose = interrupted_state.values.get('devops_compose')
-    db_task.devops_smoke_results = interrupted_state.values.get('devops_smoke_results')
     db_task.last_rejected_step = interrupted_state.values.get('last_rejected_step')
     db_task.last_rejected_at = interrupted_state.values.get('last_rejected_at')
     db.commit()
@@ -3039,10 +2280,6 @@ def get_pending_approval(db: Session = Depends(get_db)):
         "pending_spec_approval",
         "pending_code_reasoning_approval",
         "pending_code_approval",
-        "pending_frontend_plan_approval",
-        "pending_frontend_code_approval",
-        "pending_devops_plan_approval",
-        "pending_devops_test_approval",
         "pending_approval",
     ]
     pending_task = (
@@ -3111,12 +2348,6 @@ def export_tasks(db: Session = Depends(get_db)):
             "Engineering File Name",
             "Engineering Code",
             "Engineering QA",
-            "Frontend Plan",
-            "Frontend Code",
-            "Frontend Screenshot",
-            "DevOps Plan",
-            "DevOps Compose",
-            "DevOps Smoke Results",
             "Last Rejected Step",
             "Last Rejected At",
             "Pending Approval Content",
@@ -3140,12 +2371,6 @@ def export_tasks(db: Session = Depends(get_db)):
                 task.engineering_file_name or "",
                 task.engineering_code or "",
                 task.engineering_qa or "",
-                task.frontend_plan or "",
-                task.frontend_code or "",
-                task.frontend_screenshot or "",
-                task.devops_plan or "",
-                task.devops_compose or "",
-                task.devops_smoke_results or "",
                 task.last_rejected_step or "",
                 task.last_rejected_at or "",
                 task.pending_approval_content or "",
@@ -3169,10 +2394,6 @@ async def respond_to_approval(request: RespondToApprovalRequest, db: Session = D
         "pending_spec_approval",
         "pending_code_reasoning_approval",
         "pending_code_approval",
-        "pending_frontend_plan_approval",
-        "pending_frontend_code_approval",
-        "pending_devops_plan_approval",
-        "pending_devops_test_approval",
         "pending_approval",
     }
     db_task = db.query(Task).filter(Task.task_id == request.task_id).first()
@@ -3239,12 +2460,6 @@ async def respond_to_approval(request: RespondToApprovalRequest, db: Session = D
         'engineering_file_name',
         'engineering_code',
         'engineering_qa',
-        'frontend_plan',
-        'frontend_code',
-        'frontend_screenshot',
-        'devops_plan',
-        'devops_compose',
-        'devops_smoke_results',
     ]
     for field in artifact_fields:
         if final_state and final_state.get(field):
@@ -3288,10 +2503,6 @@ async def resubmit_step(request: ResubmitRequest, db: Session = Depends(get_db))
         "engineering_spec": engineering_spec_node,
         "engineering_code_reasoning": engineering_code_reasoning_node,
         "engineering_code": engineering_node,
-        "frontend_plan": frontend_plan_node,
-        "frontend_code": frontend_code_node,
-        "devops_plan": devops_plan_node,
-        "devops_test": devops_test_node,
     }
     step_fn = step_fn_map.get(request.step)
     if not step_fn:
@@ -3314,11 +2525,6 @@ async def resubmit_step(request: ResubmitRequest, db: Session = Depends(get_db))
     db_task.last_rejected_at = None
     db.commit()
     db.refresh(db_task)
-
-    # Keep the LangGraph checkpoint in sync with the resubmitted state so downstream approvals persist correctly.
-    new_state = build_state_from_task(db_task)
-    config = {"configurable": {"thread_id": request.task_id}}
-    await get_app_graph().aupdate_state(config, new_state)
     
     logger.info("Task %s resubmitted for step %s, status is now %s", request.task_id, request.step, db_task.status)
     return TaskStatus.from_orm(db_task)
@@ -3349,10 +2555,6 @@ def get_next_status(current_status: Optional[str]) -> Optional[str]:
         "pending_spec_approval",
         "pending_code_reasoning_approval",
         "pending_code_approval",
-        "pending_frontend_plan_approval",
-        "pending_frontend_code_approval",
-        "pending_devops_plan_approval",
-        "pending_devops_test_approval",
         "ready_for_gtm",
         "completed",
         "rejected",
@@ -3370,7 +2572,7 @@ def get_next_status(current_status: Optional[str]) -> Optional[str]:
 
 if __name__ == "__main__":
     host = "127.0.0.1"
-    port = int(os.getenv("PORT", "8000"))
+    port = 8000
 
     if settings.run_locally:
         host = "0.0.0.0"

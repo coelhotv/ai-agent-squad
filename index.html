@@ -586,6 +586,48 @@
                         <button class="edit-btn" type="button" data-artifact="engineering_qa">Edit</button>
                     </div>
                 </details>
+                <details id="frontend-plan-results">
+                    <summary>Frontend Plan</summary>
+                    <div class="artifact-row">
+                        <pre id="frontend-plan">No frontend plan yet.</pre>
+                        <button class="edit-btn" type="button" data-artifact="frontend_plan">Edit</button>
+                    </div>
+                </details>
+                <details id="frontend-code-results">
+                    <summary>Frontend Code Bundle</summary>
+                    <div class="artifact-row">
+                        <pre id="frontend-code">No frontend bundle yet.</pre>
+                        <button class="edit-btn" type="button" data-artifact="frontend_code">Edit</button>
+                    </div>
+                </details>
+                <details id="frontend-screenshot-results">
+                    <summary>Frontend Screenshot</summary>
+                    <div class="artifact-row">
+                        <pre id="frontend-screenshot">No screenshot yet.</pre>
+                        <button class="edit-btn" type="button" data-artifact="frontend_screenshot">Edit</button>
+                    </div>
+                </details>
+                <details id="devops-plan-results">
+                    <summary>DevOps Plan</summary>
+                    <div class="artifact-row">
+                        <pre id="devops-plan">No DevOps plan yet.</pre>
+                        <button class="edit-btn" type="button" data-artifact="devops_plan">Edit</button>
+                    </div>
+                </details>
+                <details id="devops-compose-results">
+                    <summary>DevOps Dockerfile</summary>
+                    <div class="artifact-row">
+                        <pre id="devops-compose">No Dockerfile yet.</pre>
+                        <button class="edit-btn" type="button" data-artifact="devops_compose">Edit</button>
+                    </div>
+                </details>
+                <details id="devops-smoke-results">
+                    <summary>DevOps Smoke Tests</summary>
+                    <div class="artifact-row">
+                        <pre id="devops-smoke">No smoke results yet.</pre>
+                        <button class="edit-btn" type="button" data-artifact="devops_smoke_results">Edit</button>
+                    </div>
+                </details>
             </div>
         </section>
 
@@ -666,6 +708,12 @@
             reasoning_code: engineeringCodeReasoning,
             engineering_code: engineeringCode,
             engineering_qa: engineeringQaContent,
+            frontend_plan: document.getElementById('frontend-plan'),
+            frontend_code: document.getElementById('frontend-code'),
+            frontend_screenshot: document.getElementById('frontend-screenshot'),
+            devops_plan: document.getElementById('devops-plan'),
+            devops_compose: document.getElementById('devops-compose'),
+            devops_smoke_results: document.getElementById('devops-smoke'),
         };
         let storedFlowDiagram = null;
         let storedWireframeArtifact = null;
@@ -680,6 +728,10 @@
             { key: 'pending_spec_approval', label: 'Eng. Spec', description: 'API spec & QA' },
             { key: 'pending_code_reasoning_approval', label: 'Code Reasoning', description: 'Developer plan' },
             { key: 'pending_code_approval', label: 'Eng. Code', description: 'Code prototype & QA' },
+            { key: 'pending_frontend_plan_approval', label: 'FE Plan', description: 'React/Vite UI plan' },
+            { key: 'pending_frontend_code_approval', label: 'FE Bundle', description: 'UI bundle + screenshot' },
+            { key: 'pending_devops_plan_approval', label: 'DevOps Plan', description: 'Docker plan' },
+            { key: 'pending_devops_test_approval', label: 'DevOps Test', description: 'Dockerfile + smoke' },
             { key: 'ready_for_gtm', label: 'GTM Handoff', description: 'Ready for launch docs' },
             { key: 'processing', label: 'Processing', description: 'Agent at work' },
             { key: 'completed', label: 'Shipped', description: 'Final deliverables' },
@@ -696,6 +748,10 @@
             'pending_spec_approval',
             'pending_code_reasoning_approval',
             'pending_code_approval',
+            'pending_frontend_plan_approval',
+            'pending_frontend_code_approval',
+            'pending_devops_plan_approval',
+            'pending_devops_test_approval',
             'ready_for_gtm',
             'processing',
             'completed',
@@ -712,6 +768,10 @@
             pending_spec_approval: 'Architect Agent',
             pending_code_reasoning_approval: 'Engineering Agent',
             pending_code_approval: 'Engineering Agent',
+            pending_frontend_plan_approval: 'Frontend Agent',
+            pending_frontend_code_approval: 'Frontend Agent',
+            pending_devops_plan_approval: 'DevOps Agent',
+            pending_devops_test_approval: 'DevOps Agent',
             processing: 'Agent at work...',
             ready_for_gtm: 'GTM Agent',
             completed: 'GTM Agent',
@@ -769,6 +829,10 @@
             'pending_spec_approval',
             'pending_code_reasoning_approval',
             'pending_code_approval',
+            'pending_frontend_plan_approval',
+            'pending_frontend_code_approval',
+            'pending_devops_plan_approval',
+            'pending_devops_test_approval',
             'pending_approval',
         ]);
 
@@ -781,6 +845,10 @@
             pending_spec_approval: ['engineering_spec', 'engineering_spec_qa'],
             pending_code_reasoning_approval: ['reasoning_code'],
             pending_code_approval: ['engineering_code'],
+            pending_frontend_plan_approval: ['frontend_plan'],
+            pending_frontend_code_approval: ['frontend_code', 'frontend_screenshot'],
+            pending_devops_plan_approval: ['devops_plan'],
+            pending_devops_test_approval: ['devops_compose', 'devops_smoke_results'],
         };
 
         function updateCurrentStage(status) {
@@ -867,6 +935,12 @@
             renderArtifact(engineeringCodeReasoning, null);
             renderEngineeringPrototype(null, null);
             renderArtifact(engineeringQaContent, null);
+            renderArtifact(document.getElementById('frontend-plan'), null);
+            renderArtifact(document.getElementById('frontend-code'), null);
+            renderArtifact(document.getElementById('frontend-screenshot'), null);
+            renderArtifact(document.getElementById('devops-plan'), null);
+            renderArtifact(document.getElementById('devops-compose'), null);
+            renderArtifact(document.getElementById('devops-smoke'), null);
         }
 
         function updateArtifactsFromTask(task) {
@@ -881,6 +955,12 @@
             renderArtifact(engineeringCodeReasoning, extractReasoningDisplay('reasoning_code', task?.reasoning_code));
             renderEngineeringPrototype(task?.engineering_file_name, task?.engineering_code);
             renderArtifact(engineeringQaContent, task?.engineering_qa);
+            renderArtifact(document.getElementById('frontend-plan'), task?.frontend_plan);
+            renderArtifact(document.getElementById('frontend-code'), task?.frontend_code);
+            renderArtifact(document.getElementById('frontend-screenshot'), task?.frontend_screenshot);
+            renderArtifact(document.getElementById('devops-plan'), task?.devops_plan);
+            renderArtifact(document.getElementById('devops-compose'), task?.devops_compose);
+            renderArtifact(document.getElementById('devops-smoke'), task?.devops_smoke_results);
         }
 
         ideaForm.addEventListener('submit', async (e) => {
@@ -1324,6 +1404,10 @@ function startPolling() {
                     "pending_spec_approval",
                     "pending_code_reasoning_approval",
                     "pending_code_approval",
+                    "pending_frontend_plan_approval",
+                    "pending_frontend_code_approval",
+                    "pending_devops_plan_approval",
+                    "pending_devops_test_approval",
                     "pending_approval"
                 ].includes(data.status)) {
                     approvalContent.textContent = data.pending_approval_content || 'Pending your review.';
