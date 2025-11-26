@@ -1946,13 +1946,14 @@ WORKDIR /app
 ENV PORT={app_port}
 EXPOSE {app_port}
 
-CMD ["python", "app.py"]
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "{app_port}"]
 """
 
 
 def format_smoke_test_results(endpoints: list[dict[str, str]], app_port: int = 8080) -> str:
     """Describe the smoke test steps and results for the DevOps agent."""
-    primary_endpoint = endpoints[0] if endpoints else {"method": "GET", "path": "/health"}
+    # Prefer first GET endpoint; otherwise default to health
+    primary_endpoint = next((ep for ep in endpoints if str(ep.get("method", "")).upper() == "GET"), None) or {"method": "GET", "path": "/health"}
     method = primary_endpoint.get("method", "GET")
     path = primary_endpoint.get("path", "/health")
     logger.warning("Dockerfile and/or smoke test generation failed. Switching to fallback templates!")
@@ -2163,6 +2164,43 @@ def parse_frontend_code_artifact(value: str | None) -> tuple[Optional[str], list
     return value, []
 
 
+def validate_devops_artifacts(dockerfile: str | None, smoke: str | None) -> bool:
+    """Inspect DevOps outputs and collect warnings. Only fallback if unusable (empty)."""
+    if not dockerfile or not smoke:
+        return None, None, ["DevOps artifacts missing (dockerfile/smoke)."], False
+    warnings: list[str] = []
+    banned = ["init_db", "DATABASE_URL", "ENV ", "ENV\t", "docker-compose", "volume", "alembic"]
+    for ban in banned:
+        if ban in dockerfile:
+            warnings.append(f"Remove banned snippet: {ban}")
+    if "reload" in dockerfile:
+        warnings.append("Remove reload flag.")
+    # Flexible checks for required bits
+    req_hits = []
+    if "python:3.11-slim" in dockerfile:
+        req_hits.append("python_base")
+    if "/frontend" in dockerfile:
+        req_hits.append("frontend_path")
+    if "npm run build" in dockerfile:
+        req_hits.append("npm_build")
+    if "/app/static" in dockerfile or "static" in dockerfile:
+        req_hits.append("static")
+    run_ok = all(token in dockerfile for token in ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8080"])
+    if run_ok:
+        req_hits.append("uvicorn")
+    if len(req_hits) < 5:
+        for req in req_hits:
+            if req not in dockerfile:
+                warnings.append(f"Missing required string: {req}")
+    # smoke should hit /health (or root) without /api prefix
+    if "/api/" in smoke:
+        warnings.append("Smoke test should not use /api prefix; use /health or root/primary endpoints.")
+    if "curl" not in smoke:
+        warnings.append("Smoke test should use curl for health and primary endpoint.")
+    usable = True  # keep unless empty handled above
+    return dockerfile, smoke, warnings, usable
+
+
 def extract_section(bundle: str | None, header: str) -> Optional[str]:
     """Return the text content of a markdown-like section starting with the given header."""
     if not bundle or header not in bundle:
@@ -2180,27 +2218,6 @@ def extract_section(bundle: str | None, header: str) -> Optional[str]:
     return "\n".join(collected).strip() or None
 
 
-def validate_devops_artifacts(dockerfile: str | None, smoke: str | None) -> bool:
-    """Sanity check DevOps outputs to avoid drift into DB/init/env and enforce essentials."""
-    if not dockerfile or not smoke:
-        return False
-    banned = ["init_db", "DATABASE_URL", "ENV ", "ENV\t", "docker-compose", "volume", "alembic"]
-    if any(b in dockerfile for b in banned):
-        return False
-    if "reload" in dockerfile:
-        return False
-    required_dk = ["python:3.11-slim", "/frontend", "npm run build", "/app/static", "uvicorn app:app --host 0.0.0.0 --port 8080"]
-    if not all(item in dockerfile for item in required_dk):
-        return False
-    # smoke should hit /health (or root) without /api prefix
-    if "/api/" in smoke:
-        return False
-    if "curl" not in smoke:
-        return False
-    return True
-
-
-
 def generate_devops_plan_llm(
     product_idea: str,
     engineering_spec: str | None,
@@ -2211,13 +2228,15 @@ def generate_devops_plan_llm(
     schema = {"type": "object", "properties": {"plan": {"type": "string"}}, "required": ["plan"]}
     system_prompt = (
         "You are a DevOps engineer designing a local demo deployment. Output a SHORT BULLET LIST (max 8 bullets, each starting with '-') "
-        "for a single Dockerfile (python:3.11-slim) that builds the React/Vite frontend (/frontend) and serves it via FastAPI static files on port 8080.\n"
-        "**Hard requirements:**\n"
+        "describing the steps, not the Dockerfile syntax, to build/run a single-container image (python:3.11-slim) that builds the React/Vite frontend (/frontend) and serves it via FastAPI static files on port 8080. "
+        "Do NOT output Dockerfile directives (no FROM/RUN/CMD/ENV/EXPOSE/HEALTHCHECK); only human-readable steps.\n"
+        "Hard requirements:\n"
         "- Single container, single stage; NO compose, NO extra services, NO volumes, NO env files, NO DB/schema/migration changes.\n"
         "- Build frontend inside '/frontend' (npm install && npm run build); copy dist into /app/static.\n"
         "- Install Python deps from requirements.txt; run FastAPI via `python app.py` or `uvicorn app:app --host 0.0.0.0 --port 8080`.\n"
-        "- Expose port 8080; assume API base http://localhost:8080 (no prefixes).\n"
+        "- Expose port 8080; assume API base http://localhost:8080 (no prefixes or /api paths in smoke examples).\n"
         "- Smoke mention: curl /health (or root) and one primary endpoint; keep it to one line.\n"
+        "- Do NOT mention implementing endpoints or altering backend code; this is a deployment plan only.\n"
         "Keep it concise; no paragraphs, no DB setup, no migrations, no alembic, no .env guidance -- just a plan for fellow devops implement."
     )
     user_prompt = f"""
@@ -2258,11 +2277,13 @@ def generate_devops_test_llm(
         "Use python:3.11-slim. Keep the Dockerfile minimal and the smoke steps concise (build, run, curl /health + one primary endpoint).\n"
         "HARD REQUIREMENTS:\n"
         "- Single stage/container; NO compose, NO extra services, NO volumes, NO env files, NO DB/init scripts.\n"
+        "- Base image must be python:3.11-slim.\n"
         "- Build frontend inside /frontend (npm install && npm run build); copy /frontend/dist into /app/static.\n"
         "- Install Python deps from requirements.txt. Run FastAPI via `uvicorn app:app --host 0.0.0.0 --port 8080` (no reload flag).\n"
         "- Expose port 8080; assume API base http://localhost:8080 (no prefixes or /api/ in smoke commands).\n"
         "- Do not mention implementing endpoints or changing backend code—Dockerfile and smoke only.\n"
-        "- Smoke: one-line curl for /health (or root) and one primary endpoint."
+        "- Smoke: one-line curl for /health (or root) and one primary endpoint.\n"
+        "Dockerfile **must literally include** all of the following strings: 'python:3.11-slim', '/frontend', 'npm run build', '/app/static', 'uvicorn app:app --host 0.0.0.0 --port 8080'. If you cannot include all, return empty output so fallback is used."
     )
     user_prompt = f"""
     Product idea: {product_idea}
@@ -2609,12 +2630,12 @@ def devops_test_node(state: AgentState):
         state.get('devops_plan'),
         app_port=8080,
     )
-    if validate_devops_artifacts(dockerfile_llm, smoke_llm):
-        state['devops_compose'] = dockerfile_llm
-        state['devops_smoke_results'] = smoke_llm
-    else:
-        state['devops_compose'] = format_devops_dockerfile(app_port=8080)
-        state['devops_smoke_results'] = format_smoke_test_results(endpoints, app_port=8080)
+    dockerfile_use, smoke_use, warnings, usable = validate_devops_artifacts(dockerfile_llm, smoke_llm)
+    if not usable or not dockerfile_use or not smoke_use:
+        dockerfile_use = format_devops_dockerfile(app_port=8080)
+        smoke_use = format_smoke_test_results(endpoints, app_port=8080)
+        warnings = ["Fallback DevOps artifacts used because LLM output was empty/unusable."]
+    state['devops_compose'] = json.dumps({"dockerfile": dockerfile_use, "smoke": smoke_use, "warnings": warnings})
     state['status'] = "pending_devops_test_approval"
     state['pending_approval_content'] = (
         "DevOps artifacts ready (Dockerfile + smoke plan). Review results and approve to mark the task completed."

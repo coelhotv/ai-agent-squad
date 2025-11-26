@@ -620,6 +620,7 @@
                     <div class="artifact-row">
                         <pre id="devops-compose">No Dockerfile yet.</pre>
                         <button class="edit-btn" type="button" data-artifact="devops_compose">Edit</button>
+                        <pre id="devops-compose-warnings" style="background:#fff7ed; color:#9a3412;">Warnings: none.</pre>
                     </div>
                 </details>
                 <details id="devops-smoke-results">
@@ -963,8 +964,10 @@
             renderArtifact(document.getElementById('frontend-code-warnings'), warnings.length ? warnings.join('\n') : 'No warnings.');
             renderArtifact(document.getElementById('frontend-screenshot'), task?.frontend_screenshot);
             renderArtifact(document.getElementById('devops-plan'), task?.devops_plan);
-            renderArtifact(document.getElementById('devops-compose'), task?.devops_compose);
-            renderArtifact(document.getElementById('devops-smoke'), task?.devops_smoke_results);
+            const { dockerfile, warnings: devopsWarnings, smoke } = parseDevopsArtifact(task?.devops_compose, task?.devops_smoke_results);
+            renderArtifact(document.getElementById('devops-compose'), dockerfile);
+            renderArtifact(document.getElementById('devops-compose-warnings'), devopsWarnings.length ? devopsWarnings.join('\n') : 'No warnings.');
+            renderArtifact(document.getElementById('devops-smoke'), smoke);
         }
 
         ideaForm.addEventListener('submit', async (e) => {
@@ -1066,6 +1069,23 @@
                 // treat as plain bundle
             }
             return { bundle: val, warnings: [] };
+        }
+
+        function parseDevopsArtifact(composeVal, smokeVal) {
+            let dockerfile = composeVal;
+            let warnings = [];
+            let smoke = smokeVal;
+            try {
+                const parsed = composeVal ? JSON.parse(composeVal) : null;
+                if (parsed && typeof parsed === 'object') {
+                    dockerfile = parsed.dockerfile || composeVal;
+                    warnings = Array.isArray(parsed.warnings) ? parsed.warnings : [];
+                    smoke = parsed.smoke || smokeVal;
+                }
+            } catch (e) {
+                // use raw
+            }
+            return { dockerfile: dockerfile || '', warnings, smoke: smoke || '' };
         }
 
         function decodeEscapedText(value) {
