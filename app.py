@@ -909,7 +909,6 @@ DEMO_BANNED_KEYWORDS = (
     "/users/register",
     "password_hash",
     "hashed",
-    "persistent database",
     "postgres",
     "mysql",
     "sqlite",
@@ -1353,6 +1352,7 @@ def run_spec_qa_review(
         spec_contract = json.loads(spec_text) if spec_text else {}
     except json.JSONDecodeError:
         spec_contract = {}
+        
     spec_warnings = list(spec_contract.get("warnings") or [])
     contract_ac_refs = collect_contract_ac_refs(spec_contract)
     user_ac_set = extract_acceptance_criteria(user_stories)
@@ -2057,7 +2057,7 @@ HARD REQUIREMENTS:
 - Use fetch() directly for API calls (no custom client imports), with template literals and proper closing quotes; no mocks in src/api.js.
 - Router: only one BrowserRouter wrapper in main.jsx; App.jsx must NOT create another Router. If you use Routes/Route, each Route must use element={<Component />} (React Router v6).
 - Screenshot script must be ESM (import { chromium } from '@playwright/test'); spawn npm run dev -- --host --port 4173, wait briefly, open the page, capture PNG, then stop the server.
-STRICT OUTPUT FORMAT (exact order, no extra sections):
+STRICT OUTPUT FORMAT (exact order, no extra sections, attention to heading levels):
 # React + Vite demo bundle
 ## package.json
 <json>
@@ -2095,10 +2095,15 @@ STRICT OUTPUT FORMAT (exact order, no extra sections):
     return None
 
 
-def validate_frontend_bundle(bundle: str | None) -> bool:
-    """Basic sanity check to ensure the LLM output includes required sections."""
-    if not bundle:
-        return False
+def analyze_frontend_bundle(bundle: str | None) -> tuple[Optional[str], list[str], bool]:
+    """
+    Inspect the LLM bundle for warnings. Returns (bundle_text, warnings, usable).
+    Only falls back if bundle is empty/None. Otherwise, warnings are attached for HITL.
+    """
+    if not bundle or not bundle.strip():
+        return None, [], False
+
+    warnings: list[str] = []
     required_headers = [
         "# React + Vite demo bundle",
         "## package.json",
@@ -2109,30 +2114,70 @@ def validate_frontend_bundle(bundle: str | None) -> bool:
         "## scripts/screenshot.js",
         "## How to run locally",
     ]
-    if not all(header in bundle for header in required_headers):
-        return False
+    for header in required_headers:
+        if header not in bundle:
+            warnings.append(f"Missing required section: {header}")
+
     banned_snippets = [
         "@vitejs/plugin-react/runtime/client",
-        "mock",
-        "Mock",
         "require(",
     ]
-    if any(snippet in bundle for snippet in banned_snippets):
-        return False
-    # Must mention fetch (prefer real calls) and Playwright npm script hints
+    for snippet in banned_snippets:
+        if snippet in bundle:
+            warnings.append(f"Remove banned snippet: {snippet}")
+
     if "fetch(" not in bundle:
-        return False
-    # Require key dependencies
+        warnings.append("API calls should use fetch().")
+
     required_deps = ["react-router-dom", "@playwright/test", "@vitejs/plugin-react", "\"react\": \"^18"]
-    if not all(dep in bundle for dep in required_deps):
-        return False
-    # Require evidence of dev server spawn in screenshot script
+    for dep in required_deps:
+        if dep not in bundle:
+            warnings.append(f"Dependency missing or incorrect: {dep}")
+
     if "spawn(" not in bundle and "npm run dev" not in bundle:
-        return False
-    # Router sanity: avoid double BrowserRouter usage
+        warnings.append("Screenshot script should start dev server (spawn npm run dev) before capture.")
+
     if bundle.count("BrowserRouter") > 1:
-        return False
-    return True
+        warnings.append("Multiple BrowserRouter instances detected; keep a single router.")
+
+    return bundle, warnings, True
+
+
+def parse_frontend_code_artifact(value: str | None) -> tuple[Optional[str], list[str]]:
+    """
+    Extract bundle and warnings from stored frontend_code artifact.
+    Accepts raw string (bundle only) or JSON with keys bundle/warnings.
+    """
+    if not value:
+        return None, []
+    try:
+        parsed = json.loads(value)
+        if isinstance(parsed, dict):
+            bundle = parsed.get("bundle") or ""
+            warnings = parsed.get("warnings") or []
+            if isinstance(warnings, str):
+                warnings = [warnings]
+            return bundle or None, warnings if isinstance(warnings, list) else []
+    except json.JSONDecodeError:
+        pass
+    return value, []
+
+
+def extract_section(bundle: str | None, header: str) -> Optional[str]:
+    """Return the text content of a markdown-like section starting with the given header."""
+    if not bundle or header not in bundle:
+        return None
+    parts = bundle.split(header, 1)
+    if len(parts) < 2:
+        return None
+    remainder = parts[1]
+    lines = remainder.splitlines()
+    collected: list[str] = []
+    for line in lines:
+        if line.startswith("## ") and line.strip() != header.strip():
+            break
+        collected.append(line)
+    return "\n".join(collected).strip() or None
 
 
 def validate_devops_artifacts(dockerfile: str | None, smoke: str | None) -> bool:
@@ -2496,8 +2541,21 @@ def frontend_code_node(state: AgentState):
         state.get('frontend_plan'),
         endpoints,
     )
-    state['frontend_code'] = code_llm if validate_frontend_bundle(code_llm) else build_frontend_code_bundle(endpoints)
-    state['frontend_screenshot'] = (
+    bundle, warnings, usable = analyze_frontend_bundle(code_llm)
+    if not usable or not bundle:
+        bundle = build_frontend_code_bundle(endpoints)
+        warnings = ["Fallback bundle used because LLM output was empty/unusable."]
+    state['frontend_code'] = json.dumps({"bundle": bundle, "warnings": warnings})
+
+    # Try to extract screenshot instructions from the bundle; otherwise use placeholder.
+    screenshot_section = extract_section(bundle, "## scripts/screenshot.js")
+    run_section = extract_section(bundle, "## How to run locally")
+    screenshot_text_parts = []
+    if run_section:
+        screenshot_text_parts.append("How to run locally:\n" + run_section)
+    if screenshot_section:
+        screenshot_text_parts.append("Screenshot script:\n" + screenshot_section)
+    state['frontend_screenshot'] = "\n\n".join(screenshot_text_parts).strip() or (
         "Screenshot placeholder: run `npm install`, `npm run screenshot` in the frontend folder to capture frontend_screenshot.png."
     )
     state['status'] = "pending_frontend_code_approval"
@@ -2541,12 +2599,13 @@ def devops_plan_node(state: AgentState):
 def devops_test_node(state: AgentState):
     logger.info(f"--- Node: devops_test_node (Task ID: {state['task_id']}) ---")
     endpoints = infer_endpoints_from_inputs(state.get('engineering_spec'), state.get('engineering_code'))
+    frontend_bundle, _ = parse_frontend_code_artifact(state.get('frontend_code'))
     dockerfile_llm, smoke_llm = generate_devops_test_llm(
         state.get('product_idea'),
         state.get('engineering_spec'),
         state.get('engineering_code'),
         endpoints,
-        state.get('frontend_code'),
+        frontend_bundle,
         state.get('devops_plan'),
         app_port=8080,
     )

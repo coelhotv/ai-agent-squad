@@ -598,6 +598,7 @@
                     <div class="artifact-row">
                         <pre id="frontend-code">No frontend bundle yet.</pre>
                         <button class="edit-btn" type="button" data-artifact="frontend_code">Edit</button>
+                        <pre id="frontend-code-warnings" style="background:#fff7ed; color:#9a3412;">Warnings: none.</pre>
                     </div>
                 </details>
                 <details id="frontend-screenshot-results">
@@ -937,6 +938,7 @@
             renderArtifact(engineeringQaContent, null);
             renderArtifact(document.getElementById('frontend-plan'), null);
             renderArtifact(document.getElementById('frontend-code'), null);
+            renderArtifact(document.getElementById('frontend-code-warnings'), null);
             renderArtifact(document.getElementById('frontend-screenshot'), null);
             renderArtifact(document.getElementById('devops-plan'), null);
             renderArtifact(document.getElementById('devops-compose'), null);
@@ -956,7 +958,9 @@
             renderEngineeringPrototype(task?.engineering_file_name, task?.engineering_code);
             renderArtifact(engineeringQaContent, task?.engineering_qa);
             renderArtifact(document.getElementById('frontend-plan'), task?.frontend_plan);
-            renderArtifact(document.getElementById('frontend-code'), task?.frontend_code);
+            const { bundle, warnings } = parseFrontendArtifact(task?.frontend_code);
+            renderArtifact(document.getElementById('frontend-code'), bundle);
+            renderArtifact(document.getElementById('frontend-code-warnings'), warnings.length ? warnings.join('\n') : 'No warnings.');
             renderArtifact(document.getElementById('frontend-screenshot'), task?.frontend_screenshot);
             renderArtifact(document.getElementById('devops-plan'), task?.devops_plan);
             renderArtifact(document.getElementById('devops-compose'), task?.devops_compose);
@@ -1049,6 +1053,19 @@
             } catch {
                 return null;
             }
+        }
+
+        function parseFrontendArtifact(val) {
+            if (!val) return { bundle: null, warnings: [] };
+            try {
+                const parsed = JSON.parse(val);
+                if (typeof parsed === 'object') {
+                    return { bundle: parsed.bundle || null, warnings: Array.isArray(parsed.warnings) ? parsed.warnings : [] };
+                }
+            } catch (e) {
+                // treat as plain bundle
+            }
+            return { bundle: val, warnings: [] };
         }
 
         function decodeEscapedText(value) {
