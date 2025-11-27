@@ -988,7 +988,7 @@ def run_engineering_qa_review(
         "1. **Primary Goal**: Does the code implement all schemas and endpoints from the spec? This is the main reason to 'fail' the code.\n"
         "2. **Prototype Scope**: The code *should* use in-memory storage (like a dictionary) and have no real authentication. DO NOT flag these as issues.\n"
         "3. **What to Check**: Focus on correct Pydantic models, endpoint paths and methods matching the spec, and basic error handling (like returning a 404 for a missing item).\n"
-        "4. **Be Concise**: Keep findings brief and actionable.\n"
+        "4. **Be Concise**: Keep findings brief and actionable. Before issuing final report, review all findings to guarantee that you're not repeating yourself. \n"
         "5. **Output JSON**: Your entire response must be in the specified JSON format."
     )
     user_prompt = f"""

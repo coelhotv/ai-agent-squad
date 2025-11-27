@@ -879,17 +879,29 @@
                 toggleApprovalActions(false);
                 approvalSection.classList.remove('hidden');
                 resubmitContainer.classList.remove('hidden');
+                const allowRefactor = ['engineering_spec', 'engineering_code'].includes(task.last_rejected_step);
+                const buttons = [];
+                if (allowRefactor) {
+                    buttons.push(`<button id="refactor-btn">Refactor ${task.last_rejected_step}</button>`);
+                }
+                buttons.push(`<button id="resubmit-btn">Re-submit ${task.last_rejected_step}</button>`);
                 resubmitContainer.innerHTML = `
                     <div class="error" style="margin-top:1rem;">
                         Task ${task.task_id} was rejected at step <strong>${task.last_rejected_step}</strong>.
                         <div style="margin-top:0.5rem; display:flex; gap:0.75rem; flex-wrap:wrap;">
-                            <button id="resubmit-btn">Re-submit ${task.last_rejected_step}</button>
+                            ${buttons.join('')}
                         </div>
+                        ${allowRefactor ? '<p style="margin:0.5rem 0 0; font-size:0.85rem; color:#0f172a;">Refactor keeps the previous artifact and QA feedback so the coding agent can rewrite it. Re-submit starts from scratch.</p>' : ''}
                     </div>
                 `;
                 document.getElementById('resubmit-btn').addEventListener('click', () => {
                     resubmitStep(task.task_id, task.last_rejected_step);
                 });
+                if (allowRefactor) {
+                    document.getElementById('refactor-btn').addEventListener('click', () => {
+                        resubmitStep(task.task_id, task.last_rejected_step, 'refactor');
+                    });
+                }
             } else {
                 toggleApprovalActions(true);
                 resubmitContainer.classList.add('hidden');
@@ -1196,17 +1208,19 @@
             engineeringCode.textContent = resolvedCode || 'No prototype yet.';
         }
 
-        async function resubmitStep(taskId, step) {
+        async function resubmitStep(taskId, step, mode = 'resubmit') {
             try {
-                showMessage('Resubmitting for regeneration…');
+                const label = mode === 'refactor' ? 'Refactoring artifact…' : 'Resubmitting for regeneration…';
+                showMessage(label);
                 const response = await fetch(`${API_BASE_URL}/resubmit_step`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ task_id: taskId, step })
+                    body: JSON.stringify({ task_id: taskId, step, mode })
                 });
                 if (!response.ok) throw new Error('Resubmit failed');
                 const updated = await response.json();
-                showMessage(`Task ${taskId} resubmitted for ${step}. Now pending your approval.`);
+                const action = mode === 'refactor' ? 'Refactor' : 'Re-submit';
+                showMessage(`Task ${taskId}: ${action} triggered for ${step}. Await updated artifacts.`);
                 markPendingTask(updated);
             } catch (err) {
                 console.error(err);

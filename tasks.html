@@ -286,16 +286,22 @@
             if (task.status !== 'rejected' || !task.last_rejected_step) {
                 return '';
             }
-            return `<button onclick="resubmitStep('${task.task_id}','${task.last_rejected_step}')">Re-submit ${task.last_rejected_step}</button>`;
+            const allowRefactor = ['engineering_spec', 'engineering_code'].includes(task.last_rejected_step);
+            const buttons = [];
+            if (allowRefactor) {
+                buttons.push(`<button onclick="resubmitStep('${task.task_id}','${task.last_rejected_step}','refactor')">Refactor ${task.last_rejected_step}</button>`);
+            }
+            buttons.push(`<button onclick="resubmitStep('${task.task_id}','${task.last_rejected_step}','resubmit')">Re-submit ${task.last_rejected_step}</button>`);
+            return buttons.join(' ');
         }
 
-        async function resubmitStep(taskId, step) {
+        async function resubmitStep(taskId, step, mode = 'resubmit') {
             try {
                 refreshStatus.textContent = 'Resubmitting…';
                 const response = await fetch(`${API_BASE_URL}/resubmit_step`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ task_id: taskId, step })
+                    body: JSON.stringify({ task_id: taskId, step, mode })
                 });
                 if (!response.ok) throw new Error('Resubmit failed');
                 await fetchTasks();
