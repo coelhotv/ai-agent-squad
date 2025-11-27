@@ -1,6 +1,7 @@
-# version 1.0 -- new refactor option on coding agents
+# version 1.1 -- new seemi-auto mode, which runs researcher, pm and ux automatically
 
 import os
+import asyncio
 import json
 import csv
 import re
@@ -27,6 +28,7 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 # --- Typing Imports ---
 from typing import TypedDict, Optional, List
+from collections.abc import Mapping
 
 # --- Database Imports ---
 from sqlalchemy import create_engine, Column, String, Text, text
@@ -58,6 +60,7 @@ class Task(Base):
     __tablename__ = "tasks"
     task_id = Column(String, primary_key=True, index=True)
     product_idea = Column(Text, nullable=False)
+    execution_mode = Column(String, nullable=False, default="manual")
     status = Column(String, nullable=False)
     pending_approval_content = Column(Text, nullable=True)
     research_summary = Column(Text, nullable=True)
@@ -112,6 +115,7 @@ for col_name in (
     "devops_smoke_results",
     "last_rejected_step",
     "last_rejected_at",
+    "execution_mode",
 ):
     ensure_column(col_name)
 
@@ -128,6 +132,7 @@ def get_db():
 class AgentState(TypedDict):
     task_id: str
     product_idea: str
+    execution_mode: Optional[str]
     status: str
     pending_approval_content: Optional[str]
     research_summary: Optional[str]
@@ -162,6 +167,7 @@ OLLAMA_CODING_MODEL = settings.ollama_coding_model
 OLLAMA_MODEL = settings.ollama_model
 memory_saver: Optional[AsyncSqliteSaver] = None
 app_graph = None
+SEMI_AUTO_STAGE_DELAY = float(os.getenv("SEMI_AUTO_STAGE_DELAY", "0.5"))
 
 
 def log_environment_status():
@@ -652,6 +658,61 @@ def format_endpoints_for_prompt(endpoints: list[dict[str, str]]) -> str:
         f"- {ep.get('method', 'GET')} {ep.get('path', '/')} -> {ep.get('response_model', '')}"
         for ep in endpoints
     )
+
+
+def parse_frontend_code_artifact(value: str | None) -> tuple[Optional[str], list[str]]:
+    """
+    Extract bundle and warnings from stored frontend_code artifact.
+    Accepts raw string (bundle only) or JSON with keys bundle/warnings.
+    """
+    if not value:
+        return None, []
+    try:
+        parsed = json.loads(value)
+        if isinstance(parsed, dict):
+            bundle = parsed.get("bundle") or ""
+            warnings = parsed.get("warnings") or []
+            if isinstance(warnings, str):
+                warnings = [warnings]
+            return bundle or None, warnings if isinstance(warnings, list) else []
+    except json.JSONDecodeError:
+        pass
+    return value, []
+
+
+def validate_devops_artifacts(dockerfile: str | None, smoke: str | None) -> tuple[Optional[str], Optional[str], list[str], bool]:
+    """Inspect DevOps outputs, collect warnings, and decide if they are usable."""
+    if not dockerfile or not smoke:
+        return None, None, ["DevOps artifacts missing (dockerfile/smoke)."], False
+    warnings: list[str] = []
+    banned = ["init_db", "DATABASE_URL", "docker-compose", "volume", "alembic", "ENV ", "ENV\t"]
+    for ban in banned:
+        if ban in dockerfile:
+            warnings.append(f"Remove banned snippet: {ban}")
+    if "reload" in dockerfile:
+        warnings.append("Remove reload flag.")
+
+    required_checks = {
+        "python:3.11-slim": "Base image should be python:3.11-slim.",
+        "frontend": "Frontend path should be included (e.g., /frontend).",
+        "npm run build": "Frontend build command (npm run build) missing.",
+        "static": "Copy build output into static assets (e.g., /app/static).",
+    }
+    for token, msg in required_checks.items():
+        if token not in dockerfile:
+            warnings.append(f"Missing required string: {token} ({msg})")
+
+    run_tokens = ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8080"]
+    if not all(t in dockerfile for t in run_tokens):
+        warnings.append("Run command should include uvicorn app:app --host 0.0.0.0 --port 8080.")
+
+    if "/api/" in smoke:
+        warnings.append("Smoke test should not use /api prefix; use /health or root/primary endpoints.")
+    if "curl" not in smoke:
+        warnings.append("Smoke test should use curl for health and primary endpoint.")
+
+    usable = True
+    return dockerfile, smoke, warnings, usable
 
 
 def run_research_query(product_idea: str) -> str:
@@ -2167,61 +2228,6 @@ def analyze_frontend_bundle(bundle: str | None) -> tuple[Optional[str], list[str
     return bundle, warnings, True
 
 
-def parse_frontend_code_artifact(value: str | None) -> tuple[Optional[str], list[str]]:
-    """
-    Extract bundle and warnings from stored frontend_code artifact.
-    Accepts raw string (bundle only) or JSON with keys bundle/warnings.
-    """
-    if not value:
-        return None, []
-    try:
-        parsed = json.loads(value)
-        if isinstance(parsed, dict):
-            bundle = parsed.get("bundle") or ""
-            warnings = parsed.get("warnings") or []
-            if isinstance(warnings, str):
-                warnings = [warnings]
-            return bundle or None, warnings if isinstance(warnings, list) else []
-    except json.JSONDecodeError:
-        pass
-    return value, []
-
-
-def validate_devops_artifacts(dockerfile: str | None, smoke: str | None) -> tuple[Optional[str], Optional[str], list[str], bool]:
-    """Inspect DevOps outputs, collect warnings, and decide if they are usable."""
-    if not dockerfile or not smoke:
-        return None, None, ["DevOps artifacts missing (dockerfile/smoke)."], False
-    warnings: list[str] = []
-    banned = ["init_db", "DATABASE_URL", "docker-compose", "volume", "alembic", "ENV ", "ENV\t"]
-    for ban in banned:
-        if ban in dockerfile:
-            warnings.append(f"Remove banned snippet: {ban}")
-    if "reload" in dockerfile:
-        warnings.append("Remove reload flag.")
-
-    required_checks = {
-        "python:3.11-slim": "Base image should be python:3.11-slim.",
-        "frontend": "Frontend path should be included (e.g., /frontend).",
-        "npm run build": "Frontend build command (npm run build) missing.",
-        "static": "Copy build output into static assets (e.g., /app/static).",
-    }
-    for token, msg in required_checks.items():
-        if token not in dockerfile:
-            warnings.append(f"Missing required string: {token} ({msg})")
-
-    run_tokens = ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8080"]
-    if not all(t in dockerfile for t in run_tokens):
-        warnings.append("Run command should include uvicorn app:app --host 0.0.0.0 --port 8080.")
-
-    if "/api/" in smoke:
-        warnings.append("Smoke test should not use /api prefix; use /health or root/primary endpoints.")
-    if "curl" not in smoke:
-        warnings.append("Smoke test should use curl for health and primary endpoint.")
-
-    usable = True
-    return dockerfile, smoke, warnings, usable
-
-
 def generate_devops_plan_llm(
     product_idea: str,
     engineering_spec: str | None,
@@ -2684,11 +2690,13 @@ app.add_middleware(
 # --- Pydantic Models for API ---
 class StartTaskRequest(BaseModel):
     product_idea: str
+    execution_mode: Optional[str] = "manual"
 
 class TaskStatus(BaseModel):
     task_id: str
     status: str
     product_idea: str
+    execution_mode: Optional[str] = "manual"
     pending_approval_content: Optional[str] = None
     research_summary: Optional[str] = None
     prd_summary: Optional[str] = None
@@ -2765,6 +2773,95 @@ STEP_STATUS_MAP = {
 }
 
 REFRACTORABLE_STEPS = {"engineering_spec", "engineering_code"}
+
+AUTO_ADVANCE_STATUSES = {
+    "pending_research_approval",
+    "pending_prd_approval",
+    "pending_story_approval",
+    "pending_ux_approval",
+}
+
+ARTIFACT_FIELDS = [
+    'research_summary',
+    'prd_summary',
+    'user_stories',
+    'user_flow_diagram',
+    'wireframe_html',
+    'reasoning_spec',
+    'engineering_spec',
+    'engineering_spec_qa',
+    'reasoning_code',
+    'engineering_file_name',
+    'engineering_code',
+    'engineering_qa',
+    'frontend_plan',
+    'frontend_code',
+    'frontend_screenshot',
+    'devops_plan',
+    'devops_compose',
+    'devops_smoke_results',
+]
+
+
+def normalize_execution_mode(mode: Optional[str] | None) -> str:
+    if not mode:
+        return "manual"
+    value = mode.strip().lower()
+    if value in {"semi", "semi_auto", "semi-auto", "semi auto", "on", "auto"}:
+        return "semi_auto"
+    return "manual"
+
+
+def apply_state_to_task(db_task: Task, state_values: dict | None):
+    """Mirror agent state into the Task ORM row."""
+    if not state_values:
+        return
+    if isinstance(state_values, Mapping):
+        state_dict = dict(state_values)
+    else:
+        state_dict = state_values  # assume dict-like
+    if 'status' in state_dict and state_dict.get('status'):
+        db_task.status = state_dict.get('status')
+    if 'pending_approval_content' in state_dict:
+        db_task.pending_approval_content = state_dict.get('pending_approval_content')
+    for field in ARTIFACT_FIELDS:
+        value = state_dict.get(field)
+        if value:
+            setattr(db_task, field, value)
+    if 'last_rejected_step' in state_dict and state_dict.get('last_rejected_step') is not None:
+        db_task.last_rejected_step = state_dict.get('last_rejected_step')
+    if 'last_rejected_at' in state_dict and state_dict.get('last_rejected_at') is not None:
+        db_task.last_rejected_at = state_dict.get('last_rejected_at')
+    mode_value = state_dict.get('execution_mode')
+    if mode_value:
+        db_task.execution_mode = mode_value
+
+
+async def auto_advance_until_spec(task_id: str):
+    """Auto-approve early stages when semi-auto mode is enabled."""
+    graph = get_app_graph()
+    config = {"configurable": {"thread_id": task_id}}
+    db = SessionLocal()
+    try:
+        db_task = db.query(Task).filter(Task.task_id == task_id).first()
+        if not db_task:
+            return
+        while (
+            db_task.execution_mode == "semi_auto"
+            and db_task.status in AUTO_ADVANCE_STATUSES
+        ):
+            logger.info("Auto-approving stage %s for task %s", db_task.status, db_task.task_id)
+            final_state = await graph.ainvoke(None, config)
+            if not final_state:
+                logger.warning("Auto-approval aborted for task %s: graph returned no state.", db_task.task_id)
+                break
+            apply_state_to_task(db_task, final_state)
+            db.commit()
+            db.refresh(db_task)
+            if SEMI_AUTO_STAGE_DELAY > 0:
+                await asyncio.sleep(SEMI_AUTO_STAGE_DELAY)
+    finally:
+        db.close()
 
 
 def clear_artifacts_for_step(db_task: Task, step: str):
@@ -2951,6 +3048,7 @@ def build_state_from_task(db_task: Task) -> AgentState:
     return {
         "task_id": db_task.task_id,
         "product_idea": db_task.product_idea,
+        "execution_mode": db_task.execution_mode,
         "status": db_task.status,
         "pending_approval_content": db_task.pending_approval_content,
         "research_summary": db_task.research_summary,
@@ -2981,11 +3079,13 @@ async def start_task(request: StartTaskRequest, db: Session = Depends(get_db)):
     logger.info(f"Received request to start task for idea: '{request.product_idea[:50]}...'")
     graph = get_app_graph()
     task_id = str(uuid.uuid4())
+    execution_mode = normalize_execution_mode(request.execution_mode)
     
     # 1. Create the task in our application DB
     db_task = Task(
         task_id=task_id,
         product_idea=request.product_idea,
+        execution_mode=execution_mode,
         status="starting",
     )
     db.add(db_task)
@@ -2997,6 +3097,7 @@ async def start_task(request: StartTaskRequest, db: Session = Depends(get_db)):
     initial_state = AgentState(
         task_id=task_id,
         product_idea=request.product_idea,
+        execution_mode=execution_mode,
         status="starting",
         pending_approval_content=None,
         research_summary=None,
@@ -3029,34 +3130,13 @@ async def start_task(request: StartTaskRequest, db: Session = Depends(get_db)):
 
     # 4. Get the state of the graph at the interruption point
     interrupted_state = await graph.aget_state(config)
-    # logger.info(f"Current graph state for task {task_id}: {interrupted_state.values}")
-
-    # 5. Update our application DB with the new status from the graph
-    db_task.status = interrupted_state.values['status']
-    db_task.pending_approval_content = interrupted_state.values['pending_approval_content']
-    db_task.research_summary = interrupted_state.values.get('research_summary')
-    db_task.prd_summary = interrupted_state.values.get('prd_summary')
-    db_task.user_stories = interrupted_state.values.get('user_stories')
-    db_task.user_flow_diagram = interrupted_state.values.get('user_flow_diagram')
-    db_task.wireframe_html = interrupted_state.values.get('wireframe_html')
-    db_task.reasoning_spec = interrupted_state.values.get('reasoning_spec')
-    db_task.engineering_spec = interrupted_state.values.get('engineering_spec')
-    db_task.engineering_spec_qa = interrupted_state.values.get('engineering_spec_qa')
-    db_task.reasoning_code = interrupted_state.values.get('reasoning_code')
-    db_task.engineering_file_name = interrupted_state.values.get('engineering_file_name')
-    db_task.engineering_code = interrupted_state.values.get('engineering_code')
-    db_task.engineering_qa = interrupted_state.values.get('engineering_qa')
-    db_task.frontend_plan = interrupted_state.values.get('frontend_plan')
-    db_task.frontend_code = interrupted_state.values.get('frontend_code')
-    db_task.frontend_screenshot = interrupted_state.values.get('frontend_screenshot')
-    db_task.devops_plan = interrupted_state.values.get('devops_plan')
-    db_task.devops_compose = interrupted_state.values.get('devops_compose')
-    db_task.devops_smoke_results = interrupted_state.values.get('devops_smoke_results')
-    db_task.last_rejected_step = interrupted_state.values.get('last_rejected_step')
-    db_task.last_rejected_at = interrupted_state.values.get('last_rejected_at')
+    apply_state_to_task(db_task, interrupted_state.values)
     db.commit()
     db.refresh(db_task)
     logger.info(f"Task {task_id} updated in DB to status '{db_task.status}'.")
+
+    if execution_mode == "semi_auto":
+        asyncio.create_task(auto_advance_until_spec(task_id))
 
     return TaskStatus.from_orm(db_task)
 
@@ -3077,14 +3157,16 @@ def get_pending_approval(db: Session = Depends(get_db)):
         "pending_devops_test_approval",
         "pending_approval",
     ]
-    pending_task = (
+    pending_tasks = (
         db.query(Task)
         .filter(Task.status.in_(pending_statuses))
         .order_by(Task.task_id.desc())
-        .first()
+        .all()
     )
-    if pending_task:
-        return TaskStatus.from_orm(pending_task)
+    for task in pending_tasks:
+        if task.execution_mode == "semi_auto" and task.status in AUTO_ADVANCE_STATUSES:
+            continue
+        return TaskStatus.from_orm(task)
     return None
 
 
@@ -3092,6 +3174,14 @@ def get_pending_approval(db: Session = Depends(get_db)):
 def list_tasks(db: Session = Depends(get_db)):
     tasks = db.query(Task).order_by(Task.task_id.desc()).all()
     return [TaskStatus.from_orm(task) for task in tasks]
+
+
+@app.get("/tasks/{task_id}", response_model=TaskStatus)
+def get_task(task_id: str, db: Session = Depends(get_db)):
+    task = db.query(Task).filter(Task.task_id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found.")
+    return TaskStatus.from_orm(task)
 
 
 @app.post("/update_artifact", response_model=TaskStatus)
@@ -3255,33 +3345,7 @@ async def respond_to_approval(request: RespondToApprovalRequest, db: Session = D
     logger.info(f"Graph for task {request.task_id} advanced to state '{final_state.get('status')}'.")
 
     # 4. Update our application DB with the new status/content
-    db_task.status = final_state.get('status', db_task.status)
-    db_task.pending_approval_content = final_state.get('pending_approval_content')
-    
-    artifact_fields = [
-        'research_summary',
-        'prd_summary',
-        'user_stories',
-        'user_flow_diagram',
-        'wireframe_html',
-        'reasoning_spec',
-        'engineering_spec',
-        'engineering_spec_qa',
-        'reasoning_code',
-        'engineering_file_name',
-        'engineering_code',
-        'engineering_qa',
-        'frontend_plan',
-        'frontend_code',
-        'frontend_screenshot',
-        'devops_plan',
-        'devops_compose',
-        'devops_smoke_results',
-    ]
-    for field in artifact_fields:
-        if final_state and final_state.get(field):
-            setattr(db_task, field, final_state.get(field))
-
+    apply_state_to_task(db_task, final_state)
     db.commit()
     logger.info(f"Task {request.task_id} updated in DB to final status '{db_task.status}'.")
     

@@ -55,6 +55,67 @@
             border: 1px solid rgba(148, 163, 184, 0.4);
             box-shadow: 0 20px 40px rgba(15, 23, 42, 0.08);
         }
+        .mode-toggle {
+            margin-top: 1rem;
+            padding: 0.9rem 1rem;
+            border: 1px dashed rgba(148, 163, 184, 0.6);
+            border-radius: 16px;
+            background: #f8fafc;
+            display: flex;
+            flex-direction: column;
+            gap: 0.4rem;
+        }
+        .mode-toggle label {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-weight: 600;
+            color: #0f172a;
+        }
+        .mode-hint {
+            margin: 0;
+            font-size: 0.85rem;
+            color: #475569;
+        }
+        .toggle-switch {
+            position: relative;
+            width: 56px;
+            height: 28px;
+            display: inline-block;
+        }
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #94a3b8;
+            transition: 0.3s;
+            border-radius: 999px;
+        }
+        .toggle-slider:before {
+            position: absolute;
+            content: "";
+            height: 22px;
+            width: 22px;
+            left: 4px;
+            bottom: 3px;
+            background-color: white;
+            transition: 0.3s;
+            border-radius: 50%;
+        }
+        .toggle-switch input:checked + .toggle-slider {
+            background-color: #2563eb;
+        }
+        .toggle-switch input:checked + .toggle-slider:before {
+            transform: translateX(26px);
+        }
         textarea {
             width: 100%;
             min-height: 120px;
@@ -475,6 +536,21 @@
                     <button type="submit">Start Task</button>
                     <button type="button" class="secondary" id="force-refresh-btn">Refresh Queue</button>
                 </div>
+                <div class="mode-toggle">
+                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                        <strong>Workflow mode</strong>
+                        <span id="workflow-mode-hint-label">Manual</span>
+                    </div>
+                    <label>
+                        <span>Manual</span>
+                        <span class="toggle-switch">
+                            <input type="checkbox" id="workflow-mode-toggle" aria-label="Toggle semi-auto workflow mode">
+                            <span class="toggle-slider"></span>
+                        </span>
+                        <span>Semi-auto</span>
+                    </label>
+                    <p class="mode-hint">Semi-auto will auto-approve Research → UX and pause at Spec Reasoning for HITL review.</p>
+                </div>
             </form>
         </section>
 
@@ -483,6 +559,7 @@
         <section class="status-card">
             <div class="status-pill" id="current-status-pill">Idle</div>
             <p class="status-caption">Current Agent: <strong id="current-agent-label">Coordinator</strong></p>
+            <p class="status-caption">Workflow Mode: <strong id="workflow-mode-label">Manual</strong></p>
             <div class="flow-section">
                 <div class="flow-header" id="workflow-header">
                     <h3>Current Workflow Stage</h3>
@@ -658,6 +735,9 @@
         const researchContent = document.getElementById('research-content');
         const prdContent = document.getElementById('prd-content');
         const storiesContent = document.getElementById('stories-content');
+        const workflowModeToggle = document.getElementById('workflow-mode-toggle');
+        const workflowModeHintLabel = document.getElementById('workflow-mode-hint-label');
+        const workflowModeLabel = document.getElementById('workflow-mode-label');
         const approveBtn = document.getElementById('approve-btn');
         const rejectBtn = document.getElementById('reject-btn');
         const responseMessage = document.getElementById('response-message');
@@ -719,6 +799,61 @@
         };
         let storedFlowDiagram = null;
         let storedWireframeArtifact = null;
+        let taskMonitorIntervalId = null;
+        let monitoringTaskId = null;
+
+        workflowModeToggle.addEventListener('change', () => {
+            const mode = workflowModeToggle.checked ? 'semi_auto' : 'manual';
+            workflowModeHintLabel.textContent = formatModeLabel(mode);
+        });
+
+        function stopTaskMonitor() {
+            if (taskMonitorIntervalId) {
+                clearInterval(taskMonitorIntervalId);
+                taskMonitorIntervalId = null;
+                monitoringTaskId = null;
+            }
+        }
+
+        async function pollTaskSnapshot(taskId) {
+            try {
+                const response = await fetch(`${API_BASE_URL}/tasks/${taskId}`);
+                if (!response.ok) throw new Error('Monitor fetch failed');
+                const data = await response.json();
+                workflowModeLabel.textContent = formatModeLabel(data.execution_mode);
+                updateCurrentStage(data.status);
+                updateArtifactsFromTask(data);
+                const normalizedStatus = normalizeStatus(data.status);
+                if (normalizedStatus === 'starting') {
+                    showMessage('Task initializing...');
+                } else if (autoAdvanceStatuses.has(normalizedStatus)) {
+                    approvalSection.classList.add('hidden');
+                    resubmitContainer.classList.add('hidden');
+                    showMessage(`Semi-auto running: ${workflowSteps.find(step => step.key === normalizedStatus)?.label || normalizedStatus}`);
+                } else if (pendingStatuses.has(normalizedStatus)) {
+                    stopTaskMonitor();
+                    markPendingTask(data);
+                } else if (normalizedStatus === 'processing') {
+                    showMessage('Agents are processing the next stage...');
+                } else if (normalizedStatus === 'completed') {
+                    stopTaskMonitor();
+                    showMessage(`Task ${taskId} completed.`);
+                } else if (normalizedStatus === 'rejected') {
+                    stopTaskMonitor();
+                    showMessage(`Task ${taskId} was rejected during auto-run.`, true);
+                    renderResubmitBanner(data);
+                }
+            } catch (err) {
+                console.warn('Task monitor error', err);
+            }
+        }
+
+        function startTaskMonitor(taskId) {
+            stopTaskMonitor();
+            monitoringTaskId = taskId;
+            pollTaskSnapshot(taskId);
+            taskMonitorIntervalId = setInterval(() => pollTaskSnapshot(taskId), 2000);
+        }
 
         const workflowSteps = [
             { key: 'starting', label: 'Intake', description: 'Idea capture' },
@@ -838,6 +973,13 @@
             'pending_approval',
         ]);
 
+        const autoAdvanceStatuses = new Set([
+            'pending_research_approval',
+            'pending_prd_approval',
+            'pending_story_approval',
+            'pending_ux_approval',
+        ]);
+
         const statusToArtifacts = {
             pending_research_approval: ['research_summary'],
             pending_prd_approval: ['prd_summary'],
@@ -852,6 +994,10 @@
             pending_devops_plan_approval: ['devops_plan'],
             pending_devops_test_approval: ['devops_compose', 'devops_smoke_results'],
         };
+
+        function formatModeLabel(mode) {
+            return mode === 'semi_auto' ? 'Semi-auto' : 'Manual';
+        }
 
         function updateCurrentStage(status) {
             currentStatus = normalizeStatus(status);
@@ -924,6 +1070,7 @@
             updateArtifactsFromTask(data);
             lastRejectedStep = data.last_rejected_step || null;
             updateCurrentStage(data.status);
+             workflowModeLabel.textContent = formatModeLabel(data.execution_mode);
             setFormEnabled(false);
             renderResubmitBanner(data);
         }
@@ -934,6 +1081,8 @@
             resubmitContainer.innerHTML = '';
             artifactOverrides = {};
             resubmitContainer.classList.add('hidden');
+            stopTaskMonitor();
+            workflowModeLabel.textContent = 'Manual';
             setFormEnabled(true);
         }
 
@@ -993,21 +1142,30 @@
                 showMessage('Please enter a product idea before continuing.', true);
                 return;
             }
+            const executionMode = workflowModeToggle.checked ? 'semi_auto' : 'manual';
             try {
                 disableForm(true);
                 const response = await fetch(`${API_BASE_URL}/start_task`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ product_idea: idea }),
+                    body: JSON.stringify({ product_idea: idea, execution_mode: executionMode }),
                 });
                 if (!response.ok) throw new Error('Unable to start the task.');
                 const data = await response.json();
                 currentTaskId = data.task_id;
+                workflowModeLabel.textContent = formatModeLabel(data.execution_mode);
                 clearArtifacts();
                 updateCurrentStage(data.status);
-                showMessage(`Task ${data.task_id} started (${data.status}). Waiting for the next approval.`);
+                showMessage(`Task ${data.task_id} started (${data.status}).`);
                 productIdeaTextarea.value = '';
-                startPolling();
+                if (data.execution_mode === 'semi_auto') {
+                    showMessage('Semi-auto mode engaged. Auto-approving early stages...');
+                    startTaskMonitor(data.task_id);
+                } else if (pendingStatuses.has(normalizeStatus(data.status))) {
+                    markPendingTask(data);
+                } else {
+                    startPolling();
+                }
             } catch (error) {
                 showMessage(error.message, true);
             } finally {

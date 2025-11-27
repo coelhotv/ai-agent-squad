@@ -195,6 +195,7 @@
                 <tr>
                     <td>${task.task_id}</td>
                     <td>${escapeHtml(task.product_idea || '')}</td>
+                    <td>${escapeHtml((task.execution_mode === 'semi_auto' ? 'Semi-auto' : 'Manual'))}</td>
                     <td class="status ${task.status}">${task.status}</td>
                     <td><div class="wide-cell"><pre>${escapeHtml(task.research_summary || '')}</pre></div></td>
                     <td><div class="wide-cell"><pre>${escapeHtml(task.prd_summary || '')}</pre></div></td>
@@ -227,6 +228,7 @@
                             <tr>
                                 <th>Task ID</th>
                                 <th>Product Idea</th>
+                                <th>Mode</th>
                                 <th>Status</th>
                                 <th>Research Summary</th>
                                 <th>PRD Summary</th>
