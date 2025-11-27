@@ -16,8 +16,8 @@ Ship a scoped, human-reviewed deliverable bundle for every validated idea: resea
 - Mermaid.js user flow diagram and Tailwind/HTML wireframe that preview in the UI.
 - Architect-generated API spec (`schemas` + `endpoints`) plus a QA review of its completeness.
 - Engineering prototype code (`main.py`-style FastAPI) plus QA commentary before final approval.
-- Front-end bundle plan + React/Vite code + optional screenshot for the demo UI that calls the prototype endpoints.
-- DevOps plan + single-container Dockerfile (8080) + smoke test notes/logs for the demo image.
+- Front-end bundle plan + React/Vite code (stored as JSON `{bundle, warnings}`) + screenshot instructions pulled from the bundle when present.
+- DevOps plan + single-container Dockerfile (8080) + smoke test notes/logs (stored as JSON `{dockerfile, smoke, warnings}`) for the demo image.
 - Human edits captured on any pending artifact and synchronized back into the LangGraph checkpoint.
 - Status metadata (`status`, `pending_approval_content`, `last_rejected_step`, `last_rejected_at`) persisted in `tasks.db` for dashboards and exports.
 

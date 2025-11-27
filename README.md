@@ -3,7 +3,7 @@
 This repo runs a LangGraph-based **Coordinator** that serializes a research- → product → UX → engineering sprint, pausing after each major output so a human reviewer can approve, edit, or reject the artifact before the next specialist continues. The FastAPI backend, SQLite task store, Ollama/Perplexity calls, and a single-page intake UI (index.html) work as a single loop that keeps every task resumable, traceable, and exportable.
 
 ## Highlights
-- **Sequential agents:** Research → Product PRD → Product Stories → UX (flows + wireframes) → Architect spec with QA → Engineering code with QA → (ready for GTM). Each node interrupts for HITL approval and logs its status in `tasks.db`.
+- **Sequential agents:** Research → Product PRD → Product Stories → UX (flows + wireframes) → Architect spec with QA → Engineering code with QA → Frontend plan+bundle → DevOps plan+Dockerfile+smoke → (ready for GTM). Each node interrupts for HITL approval and logs its status in `tasks.db`.
 - **Artifact control:** All pending artifacts can be edited inline while the status is waiting (`pending_*`), edits persist to both the DB and the LangGraph checkpoint, and a rejection triggers a resubmit cycle that reruns that node with cleared downstream data.
 - **UI & endpoints:** `index.html` shows workflow pills, a status badge, artifact collapsibles with edit overlays, Mermaid/wireframe preview buttons, approval buttons, and optimistic status updates backed by endpoints like `/start_task`, `/respond_to_approval`, `/update_artifact`, `/resubmit_step`, `/get_pending_approval`, `/tasks`, and `/tasks_dashboard`.
 - **Resilience:** `tasks.db` tracks every artifact/QA report while `checkpoints.sqlite` (AsyncSqliteSaver) keeps the graph state live, so the app can resume a paused workflow on restart, and `/tasks/export` streams a CSV for auditing.
@@ -15,6 +15,8 @@ This repo runs a LangGraph-based **Coordinator** that serializes a research- →
 - Mermaid.js user flow diagram and Tailwind/HTML wireframe preview.
 - Architect-generated API spec (`schemas` + `endpoints`) plus its QA review.
 - Engineering prototype (`main.py`-style code) plus QA output before final approval.
+- Frontend bundle stored as JSON `{bundle, warnings}` so HITL can see LLM output plus any validator findings; screenshot guidance is extracted from the bundle sections when present.
+- DevOps test artifacts stored as JSON `{dockerfile, smoke, warnings}`; the UI surfaces the LLM output and warnings, falling back only if the LLM returns nothing.
 - (Future) GTM README/package notes once the workflow reaches the GTM node.
 
 ## APIs, UI, and Controls
