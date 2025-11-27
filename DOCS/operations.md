@@ -8,10 +8,10 @@
 
 ## Workflow Interaction
 
-- Approvals are the single source of truth. `/respond_to_approval` flips the `pending_*` status to `processing`, resumes the graph, and writes new artifacts back to `tasks.db`. Approve (`approved: true`) to continue, or reject (`approved: false`) to surface the resubmit banner.
+- Approvals are the single source of truth. `/respond_to_approval` flips the `pending_*` status to `processing`, resumes the graph, and writes new artifacts back to `tasks.db`. Approve (`approved: true`) to continue, or reject (`approved: false`) to surface the resubmit banner. When a task starts in **semi-auto**, expect Research → PRD → Stories → UX to advance on their own; the UI’s live monitor (powered by `/tasks/{task_id}`) keeps the status card/artifacts refreshed until Spec Reasoning pauses for manual review.
 - Humans can edit research/PRD/stories/flow/wireframe/spec/code/QA artifacts while the task is pending by clicking the Edit button; the overlay posts `/update_artifact`, updating both the DB and LangGraph checkpoint state.
 - If you reject a review, use the resubmit banner in the UI or call `POST /resubmit_step` to rerun a single node. The backend clears downstream artifacts before rerunning the node function so no stale data leaks forward.
-- `GET /get_pending_approval` is polled every 4 seconds while the UI waits for work. `/tasks` drives `tasks.html`, and `/tasks/export` streams `tasks_export.csv` (includes all artifact columns plus `pending_approval_content`, `last_rejected_step`, `last_rejected_at`).
+- `GET /get_pending_approval` is polled every 4 seconds while the UI waits for work and now skips tasks still auto-advancing. `/tasks` drives `tasks.html`, `/tasks/{task_id}` feeds the semi-auto monitor, and `/tasks/export` streams `tasks_export.csv` (includes all artifact columns plus `pending_approval_content`, `last_rejected_step`, `last_rejected_at`).
 
 ## Persistence Hygiene
 

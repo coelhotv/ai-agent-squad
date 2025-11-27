@@ -28,6 +28,11 @@ Each phase documents a major milestone for the Multi-Agent Product Squad. Use th
 - Developer agent implements the spec as code, then runs an engineering QA review (`engineering_qa`) before pausing at `pending_code_approval`.
 - The UI shows spec/code/QA artifacts, and CSV exports include all engineering outputs.
 
+### Phase 5.5 – Semi-Auto Mode (✅)
+- Added Manual/Semi-auto toggle on the intake form plus backend `execution_mode` tracking.
+- Built `auto_advance_until_spec` and the `/tasks/{task_id}` snapshot endpoint so Research → PRD → Stories → UX auto-run while the UI streams live status/artifact updates.
+- `/get_pending_approval` now skips auto-advancing tasks until they pause at Spec Reasoning, keeping HITL focused on later stages.
+
 ## In Progress
 
 - None. The stack currently pauses at `pending_code_approval` before a future GTM node marks tasks `ready_for_gtm`.

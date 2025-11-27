@@ -3,7 +3,8 @@
 This repo runs a LangGraph-based **Coordinator** that serializes a research- → product → UX → engineering sprint, pausing after each major output so a human reviewer can approve, edit, or reject the artifact before the next specialist continues. The FastAPI backend, SQLite task store, Ollama/Perplexity calls, and a single-page intake UI (index.html) work as a single loop that keeps every task resumable, traceable, and exportable.
 
 ## Highlights
-- **Sequential agents:** Research → Product PRD → Product Stories → UX (flows + wireframes) → Architect spec with QA → Engineering code with QA → Frontend plan+bundle → DevOps plan+Dockerfile+smoke → (ready for GTM). Each node interrupts for HITL approval and logs its status in `tasks.db`.
+- **Manual or semi-auto flow:** The intake form now includes a Manual/Semi-auto toggle. Manual mirrors the classic HITL loop. Semi-auto automatically approves Research → PRD → Stories → UX, streaming live status/artifact updates in the UI before returning control at Spec Reasoning.
+- **Sequential agents:** Research → Product PRD → Product Stories → UX (flows + wireframes) → Architect spec with QA → Engineering code with QA → Frontend plan+bundle → DevOps plan+Dockerfile+smoke → (ready for GTM). Each node interrupts for HITL approval (or auto-advances in semi-auto) and logs its status in `tasks.db`.
 - **Artifact control:** All pending artifacts can be edited inline while the status is waiting (`pending_*`), edits persist to both the DB and the LangGraph checkpoint, and a rejection triggers a resubmit cycle that reruns that node with cleared downstream data.
 - **UI & endpoints:** `index.html` shows workflow pills, a status badge, artifact collapsibles with edit overlays, Mermaid/wireframe preview buttons, approval buttons, and optimistic status updates backed by endpoints like `/start_task`, `/respond_to_approval`, `/update_artifact`, `/resubmit_step`, `/get_pending_approval`, `/tasks`, and `/tasks_dashboard`.
 - **Resilience:** `tasks.db` tracks every artifact/QA report while `checkpoints.sqlite` (AsyncSqliteSaver) keeps the graph state live, so the app can resume a paused workflow on restart, and `/tasks/export` streams a CSV for auditing.
@@ -21,12 +22,13 @@ This repo runs a LangGraph-based **Coordinator** that serializes a research- →
 
 ## APIs, UI, and Controls
 - `POST /start_task`: kicks off a new task, writes a `Task` row, and runs the LangGraph until the first interruption.
+- `GET /tasks/{task_id}`: returns the latest snapshot for a single task; the UI uses this to monitor semi-auto runs and update status/artifacts in real time.
 - `POST /respond_to_approval`: approves/rejects regardless of node, resumes the graph, applies artifact overrides, updates statuses, and streams the new artifacts back to the UI.
 - `POST /update_artifact`: persist edits while a task is pending so downstream nodes consume the updated content.
 - `POST /resubmit_step`: reruns one node after a rejection by clearing downstream artifacts and invoking the node function directly.
 - `GET /get_pending_approval`: polled on page load/polling to grab the next waiting task and lock the intake form until it is approved/rejected.
 - `/tasks` and `/tasks_export` keep the dashboard in sync with `tasks.db`; `/tasks_dashboard` serves `tasks.html` and `/` serves `index.html`.
-- The UI locks the form while a pending approval is active, renders status pills, shows approval prompts, and enables Flow/Wireframe previews in new tabs.
+- The UI locks the form while a pending approval is active, renders status pills, shows approval prompts, and enables Flow/Wireframe previews in new tabs. During semi-auto runs it streams live workflow and artifact updates so reviewers can watch the early stages progress before manual approval resumes.
 
 ## Setup & Operations
 1. Install [Ollama](https://ollama.com) and Docker Desktop (the app communicates with `http://host.docker.internal:11434`).

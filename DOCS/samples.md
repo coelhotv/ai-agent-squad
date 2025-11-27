@@ -1,6 +1,6 @@
 # Agents' artifacts examples
 
-The idea of this document is to give current examples of artifacts that every single agent in the **Multi-Agent Product Squad** is producing. This way, we could assess, before running the full workflow, what kind of output could be expected.
+The idea of this document is to give current examples of artifacts that every single agent in the **Multi-Agent Product Squad** is producing. This way, we could assess, before running the full workflow, what kind of output could be expected. Whether a task runs in Manual or Semi-auto mode, the artifacts below are identical—the new mode simply accelerates the Research → PRD → Stories → UX stages before pausing at Spec Reasoning.
 
 ## Product idea submitted
 > *App to track smoked cigarettes.*
