@@ -8,6 +8,10 @@ We are building a **Multi-Agent Product Squad** that intakes early-stage ideas, 
 
 Ship a scoped, human-reviewed deliverable bundle for every validated idea: research intelligence, a focused PRD, actionable user stories, UX flows/wireframes, an API spec, prototype code, and eventually GTM packaging—all while keeping a person in the loop for every checkpoint and edit.
 
+### Manual vs. Semi-Auto Modes
+
+The intake UI now exposes a Manual/Semi-auto toggle. Manual preserves the classic “approve every stage” loop. Semi-auto automatically advances the first four stages (Research → PRD → Stories → UX), streaming status/artifact updates while humans observe, then pauses at Spec Reasoning for the normal approval chain. Every task stores its `execution_mode` so dashboards and exports distinguish which path it followed.
+
 ## What Falls Out of the Graph
 
 - Research summary (Perplexity `sonar-pro` JSON → human-readable text, with DuckDuckGo fallback).

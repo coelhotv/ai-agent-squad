@@ -2,7 +2,7 @@
 
 ## Backend & Graph
 
-- **FastAPI (`app.py`):** Hosts `/start_task`, `/respond_to_approval`, `/update_artifact`, `/resubmit_step`, `/get_pending_approval`, `/tasks`, `/tasks/export`, `/tasks_dashboard`, `/`, and `/status`. It wires request handling, logging, and the SQLite `Task` model with the LangGraph graph.
+- **FastAPI (`app.py`):** Hosts `/start_task`, `/respond_to_approval`, `/update_artifact`, `/resubmit_step`, `/get_pending_approval`, `/tasks`, `/tasks/{task_id}`, `/tasks/export`, `/tasks_dashboard`, `/`, and `/status`. It wires request handling, logging, and the SQLite `Task` model (including the new `execution_mode` field) with the LangGraph graph.
 - **LangGraph State Graph:** Seven nodes (`research`, `product_prd`, `product_stories`, `ux_design`, `engineering_spec`, `engineering`, `approved`) run sequentially, interrupting before each approval. `initialize_graph` compiles the graph with an `AsyncSqliteSaver` checkpointer so checkpoints live in `checkpoints.sqlite`.
 
 ## Persistence Layers
@@ -21,7 +21,7 @@
 
 ## Frontend
 
-- **`index.html`:** Presents the hero intake card, workflow timeline, approval banner, artifact collapsibles with edit overlays, Mermaid/wireframe preview buttons (open in new tabs), optimistic status updates, queue refreshing, and rejection/resubmission handling.
+- **`index.html`:** Presents the hero intake card, workflow timeline, approval banner, artifact collapsibles with edit overlays, Mermaid/wireframe preview buttons (open in new tabs), optimistic status updates, queue refreshing, and rejection/resubmission handling. The Manual/Semi-auto toggle posts `execution_mode`, and a task-monitor loop (polling `/tasks/{task_id}`) streams live status/artifact updates while semi-auto advances early stages.
 - **`tasks.html`:** Displays the entire `tasks.db` table, polls `/tasks`, and shows status badges/export controls; `/tasks_dashboard` serves this file via `FileResponse`.
 - **Artifact Editing:** While a task is pending, each artifact card enables an Edit button that opens an overlay. The overlay submits `POST /update_artifact` with the new content, which immediately updates both the UI and LangGraph state so downstream agents see the edits.
 

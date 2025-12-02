@@ -6,13 +6,14 @@ This document maps how FastAPI, LangGraph, SQLite, and the Ollama/Perplexity too
 
 - **FastAPI backend (`app.py`):** Exposes the public API, manages `tasks.db`, coordinates checkpoint updates, and serves static UI assets (`index.html`, `tasks.html`). It loads configuration via `app_settings.get_settings()`, logs environment details, and ensures the SQLite schema evolves through `ensure_column`.
 - **LangGraph + AsyncSqliteSaver:** The `workflow` StateGraph defines nodes for each specialist (research → PRD → stories → UX → engineering spec → engineering code → approved). The graph compiles once on startup and uses `AsyncSqliteSaver.from_conn_string(settings.checkpoints_path)` so every run writes into `checkpoints.sqlite`; it interrupts before each node listed in `interrupt_before`, enabling human approvals.
-- **SQLite & Task Model:** `tasks.db` stores the `Task` ORM model with every artifact field (`research_summary`, `prd_summary`, etc.), status metadata (`status`, `pending_approval_content`, `last_rejected_step`, etc.), and ensures the UI can query/persist all artifacts.
+- **SQLite & Task Model:** `tasks.db` stores the `Task` ORM model with every artifact field (`research_summary`, `prd_summary`, etc.), status metadata (`status`, `pending_approval_content`, `execution_mode`, `last_rejected_step`, etc.), and ensures the UI can query/persist all artifacts.
 - **Vanilla JS UI:** `index.html` drives the HITL experience: workflow cards, approval buttons, artifact collapsibles, edit overlays, Mermaid/wireframe previews, optimistic statuses, and a queue refresher. `/tasks.html` (served via `/tasks_dashboard`) polls `/tasks`.
+- **Semi-auto switch + monitor:** The intake form toggle posts `execution_mode`. When `semi_auto`, the backend spawns `auto_advance_until_spec`, a background coroutine that iteratively runs Research → PRD → Stories → UX. `/tasks/{task_id}` powers the UI monitor loop to stream status/artifact updates until Spec Reasoning pauses for HITL.
 
 ## LangGraph Workflow
 
 1. **Start task (`start_task` node):** Creates a UUID, persists a new `Task` record (`status="starting"`), defines `AgentState`, and invokes `graph.ainvoke` until the first interruption. The graph’s `thread_id` equals the `task_id`.
-2. **Node sequence:** Research → PRD → Stories → UX → Engineering spec → Engineering code → Approved. Each node generates artifacts, updates `state.status` to a `pending_*` flag, and writes a user-facing `pending_approval_content` description before returning. The `approved` node marks the status as `completed` and clears the pending text.
+2. **Node sequence:** Research → PRD → Stories → UX → Engineering spec → Engineering code → Approved. Each node generates artifacts, updates `state.status` to a `pending_*` flag, and writes a user-facing `pending_approval_content` description before returning. In semi-auto mode the first four `pending_*` states are auto-advanced by the background coroutine. The `approved` node marks the status as `completed` and clears the pending text.
 3. **Interrupts:** The graph interrupts before the first five nodes plus engineering checkpoints (`interrupt_before` list). After each interruption, `start_task`/`respond_to_approval` fetch `graph.aget_state` to sync `tasks.db` with the in-memory state.
 
 ## Persistence & State
@@ -35,6 +36,7 @@ This document maps how FastAPI, LangGraph, SQLite, and the Ollama/Perplexity too
 - `/update_artifact`: Allows inline edits while a task is pending; it writes the new text to both `tasks.db` and the LangGraph checkpoint so downstream agents see the human spin.
 - `/resubmit_step`: Clears downstream artifacts, rebuilds an `AgentState` from the DB, moves `status` to the requested `pending_*` phase, and re-invokes the relevant node function for quick reruns after rejection.
 - `/tasks/export`: Streams a CSV with every artifact column plus `pending_approval_content` for audits.
+- `/tasks/{task_id}`: Provides real-time snapshots for the semi-auto monitor so the UI can reflect intermediate states and artifacts without interrupting the LangGraph run. `/get_pending_approval` skips tasks still auto-advancing.
 - UI resilience: `index.html` polls `/get_pending_approval`, locks submissions when work is in flight, renders resubmit banners when statuses hit `rejected`, and only reenables editing once the task returns to a pending state.
 - **QA enforcement:** `run_spec_qa_review` now fails whenever the parsed findings list is non-empty and appends a checklist reminding reviewers about missing ACs or demo constraints; this stops the workflow from pretending a spec is “pass” when it still lacks required artifacts. Likewise, `run_engineering_qa_review` compares the runtime code against the spec AC references, watches for the banned keywords we track in `DEMO_BANNED_KEYWORDS`, and highlights any simulated-notification gaps so real push reminders never get forgotten.
 

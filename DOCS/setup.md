@@ -43,6 +43,7 @@ These packages support LangGraph checkpoints, DuckDuckGo fallbacks, and Perplexi
 - `OLLAMA_BASE_URL` (optional): Defaults to `http://host.docker.internal:11434`. Change only if Ollama exposes a different host/port.
 - `DATABASE_URL`: Controls where `tasks.db` lives. The app logs the URL on startup and creates the file if it is missing.
 - `CHECKPOINTS_PATH`: Controls where `checkpoints.sqlite` is stored; if the parent directory is missing, the app will attempt to create it and log the result.
+- `SEMI_AUTO_STAGE_DELAY` (optional): Float seconds between auto-advanced stages (default `0.5`). Increase if you want more time to observe the UI updates while semi-auto runs.
 
 Copy `.env.example` to `.env` and update values there. Docker Compose automatically loads `.env`, so you can tweak configs without rebuilding. For ad-hoc overrides, you can still export them in your shell.
 
@@ -67,7 +68,7 @@ Run this only when you intentionally need to discard progress (schema changes, s
 docker-compose up -d --build
 ```
 
-This builds the image, installs dependencies, and starts the FastAPI server. Visit `http://localhost:8000` to see the intake UI and `http://localhost:8000/tasks_dashboard` for the live dashboard.
+This builds the image, installs dependencies, and starts the FastAPI server. Visit `http://localhost:8000` to see the intake UI (which now includes the Manual/Semi-auto toggle) and `http://localhost:8000/tasks_dashboard` for the live dashboard.
 
 If you exported `PERPLEXITY_API_KEY`, Docker Compose will pass it through automatically (see the `environment` block in `docker-compose.yml`).
 

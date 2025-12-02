@@ -852,7 +852,7 @@
             stopTaskMonitor();
             monitoringTaskId = taskId;
             pollTaskSnapshot(taskId);
-            taskMonitorIntervalId = setInterval(() => pollTaskSnapshot(taskId), 2000);
+            taskMonitorIntervalId = setInterval(() => pollTaskSnapshot(taskId), 5000);
         }
 
         const workflowSteps = [
